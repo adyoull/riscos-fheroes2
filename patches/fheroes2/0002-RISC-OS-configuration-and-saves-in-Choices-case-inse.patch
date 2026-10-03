@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <adyoull@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 22:56:03 +0100
+Subject: [PATCH] RISC OS: configuration and saves in Choices, case-insensitive
+ file names
+
+- Configuration, saves and other user files go in <Choices$Write>.fheroes2
+  (written as /<Choices$Write>/fheroes2; UnixLib expands <var> in names).
+- The game data is looked for, as elsewhere, next to the program (inside
+  !fheroes2) and in the Choices directory, and also in the directory named
+  by fheroes2$Data if that is set.
+- RISC OS file names are case-insensitive, so GetCaseInsensitivePath()
+  returns the path unchanged, as on Windows.
+---
+ src/engine/system.cpp | 26 +++++++++++++++++++++-----
+ 1 file changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/src/engine/system.cpp b/src/engine/system.cpp
+index bd8e6f5..c761c4d 100644
+--- a/src/engine/system.cpp
++++ b/src/engine/system.cpp
+@@ -38,7 +38,7 @@
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+-#elif defined( TARGET_PS_VITA )
++#elif defined( TARGET_PS_VITA ) || defined( __riscos__ )
+ #include <algorithm>
+ #endif
+ 
+@@ -76,7 +76,7 @@
+ 
+ namespace
+ {
+-#if !defined( __linux__ ) || defined( ANDROID )
++#if ( !defined( __linux__ ) || defined( ANDROID ) ) && !defined( __riscos__ )
+     std::string GetHomeDirectory( const std::string_view appName )
+     {
+ #if defined( TARGET_PS_VITA )
+@@ -325,6 +325,15 @@ void System::appendOSSpecificDirectories( std::vector<std::string> & directories
+     if ( std::find( directories.begin(), directories.end(), path ) == directories.end() ) {
+         directories.emplace_back( path );
+     }
++#elif defined( __riscos__ )
++    // RISC OS: the game data (DATA, MAPS...) may also be in a directory named by the
++    // system variable fheroes2$Data. UnixLib expands <var> in file names.
++    if ( const char * dataVar = getenv( "fheroes2$Data" ); dataVar != nullptr && *dataVar != '\0' ) {
++        const std::string path{ "/<fheroes2$Data>" };
++        if ( std::find( directories.begin(), directories.end(), path ) == directories.end() ) {
++            directories.emplace_back( path );
++        }
++    }
+ #else
+     (void)directories;
+ #endif
+@@ -340,7 +349,10 @@ std::string System::GetConfigDirectory( const std::string_view appName )
+     }
+ 
+     std::string result = [&appName]() -> std::string {
+-#if defined( __linux__ ) && !defined( ANDROID )
++#if defined( __riscos__ )
++        // RISC OS: <Choices$Write>.fheroes2 (UnixLib expands <var> in file names).
++        return concatPath( "/<Choices$Write>", appName );
++#elif defined( __linux__ ) && !defined( ANDROID )
+         if ( const char * configEnv = getenv( "XDG_CONFIG_HOME" ); configEnv != nullptr ) {
+             return concatPath( configEnv, appName );
+         }
+@@ -372,7 +384,10 @@ std::string System::GetDataDirectory( const std::string_view appName )
+     }
+ 
+     std::string result = [&appName]() -> std::string {
+-#if defined( __linux__ ) && !defined( ANDROID )
++#if defined( __riscos__ )
++        // RISC OS: saves and other user data go with the configuration in Choices.
++        return concatPath( "/<Choices$Write>", appName );
++#elif defined( __linux__ ) && !defined( ANDROID )
+         if ( const char * dataEnv = getenv( "XDG_DATA_HOME" ); dataEnv != nullptr ) {
+             return concatPath( dataEnv, appName );
+         }
+@@ -453,7 +468,8 @@ bool System::IsDirectory( const std::string_view path )
+ 
+ bool System::GetCaseInsensitivePath( const std::string_view path, std::string & correctedPath )
+ {
+-#if !defined( _WIN32 ) && !defined( ANDROID ) && !defined( TARGET_PS_VITA ) && !defined( __IPHONEOS__ )
++// RISC OS file names are case-insensitive, as on Windows.
++#if !defined( _WIN32 ) && !defined( ANDROID ) && !defined( TARGET_PS_VITA ) && !defined( __IPHONEOS__ ) && !defined( __riscos__ )
+     // The following code is based on https://github.com/OneSadCookie/fcaseopen and assumes the use of POSIX IEEE Std 1003.1-2001 pathnames
+     correctedPath.clear();
+ 

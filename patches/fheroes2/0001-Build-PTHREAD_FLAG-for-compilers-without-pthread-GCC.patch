@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <adyoull@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 22:51:28 +0100
+Subject: [PATCH] Build: PTHREAD_FLAG for compilers without -pthread (GCCSDK
+ for RISC OS)
+
+GCCSDK's GCC for RISC OS doesn't accept -pthread: threads are always
+part of UnixLib. src/dist/Makefile now uses $(PTHREAD_FLAG), which
+defaults to -pthread, so the RISC OS build sets it empty.
+---
+ src/dist/Makefile | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/dist/Makefile b/src/dist/Makefile
+index 769d00b..cef292b 100644
+--- a/src/dist/Makefile
++++ b/src/dist/Makefile
+@@ -28,8 +28,12 @@ TARGET := fheroes2
+ # Common build options for fheroes2 and third-party libraries
+ #
+ 
++# Thread flag; empty for compilers that don't know it (GCCSDK for RISC OS,
++# where threads are always part of the C library)
++PTHREAD_FLAG ?= -pthread
++
+ # Common flags for both C and C++ compilers
+-CCFLAGS := -fsigned-char -pthread
++CCFLAGS := -fsigned-char $(PTHREAD_FLAG)
+ # Flags for the C compiler
+ CFLAGS := $(CFLAGS)
+ # Flags for the C++ compiler
+@@ -37,7 +41,7 @@ CXXFLAGS := $(CXXFLAGS)
+ # Flags for the preprocessor
+ CPPFLAGS := $(CPPFLAGS)
+ # Flags for the linker
+-LDFLAGS := $(LDFLAGS) -pthread
++LDFLAGS := $(LDFLAGS) $(PTHREAD_FLAG)
+ # Flags for additional libraries
+ LDLIBS := $(LDLIBS)
+ 

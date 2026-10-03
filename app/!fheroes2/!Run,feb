@@ -1,0 +1,45 @@
+| !Run for !fheroes2 - RISC OS port of fheroes2 (Heroes of Might and Magic II engine)
+| Built with GCCSDK GCC 10.2 (arm-riscos-gnueabihf), statically linked with
+| riscos-mesa's SDL2 and converted to an Absolute (AIF) file, so
+| !SharedLibs isn't needed.
+
+Set fheroes2$Dir <Obey$Dir>
+IconSprites <fheroes2$Dir>.!Sprites
+
+| --- Game data --------------------------------------------------------
+| fheroes2 needs the data of the original game (or its free demo): the
+| DATA and MAPS directories (plus ANIM and MUSIC if you have them). Put
+| them inside this application, next to this file, or anywhere else and
+| *Set fheroes2$Data to that directory (e.g. in your !Boot).
+
+| --- Threads ----------------------------------------------------------
+| The game uses threads (UnixLib). PThreadTicker keeps them running while
+| the game waits for the desktop. Loaded from !System if there, else ours.
+RMEnsure PThreadTicker 0.01 IfThere System:Modules.PThrTicker Then RMLoad System:Modules.PThrTicker
+RMEnsure PThreadTicker 0.01 RMLoad <fheroes2$Dir>.PThrTicker
+
+| --- Sound ------------------------------------------------------------
+| Sound goes through SharedSoundBuffer, StreamManager and SharedSound
+| (in !System), mixed with other programs' sound. SharedSound is part of
+| RISC OS; SharedSoundBuffer and StreamManager are in ssb.zip from
+| https://orac.co.uk/software/rdpclient/rdpclient.html. Without them the
+| game plays silently. The music is MIDI, played by the game itself
+| through the SoundFont in files.soundfonts.
+RMEnsure SharedSound 1.07 IfThere System:Modules.SSound Then RMLoad System:Modules.SSound
+RMEnsure StreamManager 0.03 IfThere System:Modules.StreamMan Then RMLoad System:Modules.StreamMan
+RMEnsure SharedSoundBuffer 0.07 IfThere System:Modules.SSBuffer Then RMLoad System:Modules.SSBuffer
+
+| --- Logging ----------------------------------------------------------
+| Test builds log to <Wimp$ScrapDir>.fheroes2log. To turn the log off,
+| put a | in front of the next line.
+Set fheroes2$LogOn 1
+Unset fheroes2$Log
+If "<fheroes2$LogOn>"<>"" Then Set fheroes2$Log /|<Wimp$ScrapDir>/fheroes2log
+Unset fheroes2$LogOn
+
+| --- Memory -----------------------------------------------------------
+| The C heap goes in dynamic areas ("fheroes2 Heap"), so the WimpSlot only
+| holds the program and its stack.
+WimpSlot -min 24000K -max 24000K
+
+Do Run <fheroes2$Dir>.fheroes2 %*0

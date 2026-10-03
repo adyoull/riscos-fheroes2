@@ -1,0 +1,377 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <adyoull@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 22:56:03 +0100
+Subject: [PATCH] RISC OS: draw straight into the window surface; software
+ cursor
+
+RISC OS has no accelerated SDL renderer (SDL's software renderer would
+copy every frame twice more), and fheroes2 refuses to start without one.
+On RISC OS the 8-bit game screen is now converted through the palette
+straight into the window surface, scaled with nearest pixels (aspect
+kept, centred, black borders) when the window is bigger than the game
+screen, e.g. in full screen. Only the changed rectangle is converted and
+plotted. An SDL event watch maps mouse coordinates from the window back
+to the game screen, as SDL's renderer would.
+
+The RISC OS pointer has only three colours and the SDL driver can't make
+colour pointers, so the cursor is always drawn by the game (software
+emulation). The SDL driver hides the desktop pointer only while it is
+over the game window.
+---
+ src/engine/screen.cpp | 293 +++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 292 insertions(+), 1 deletion(-)
+
+diff --git a/src/engine/screen.cpp b/src/engine/screen.cpp
+index 78fbc23..023f0bc 100644
+--- a/src/engine/screen.cpp
++++ b/src/engine/screen.cpp
+@@ -533,8 +533,13 @@ namespace
+             }
+         }
+ 
+-        void enableSoftwareEmulation( const bool enable ) override
++        void enableSoftwareEmulation( bool enable ) override
+         {
++#if defined( __riscos__ )
++            // RISC OS: the SDL driver can't make colour pointers (the RISC OS pointer
++            // has only 3 colours), so the game always draws its own cursor.
++            enable = true;
++#endif
+             if ( enable == _emulation ) {
+                 return;
+             }
+@@ -573,6 +578,18 @@ namespace
+ 
+         RenderCursor()
+         {
++#if defined( __riscos__ )
++            // RISC OS: software cursor (see enableSoftwareEmulation()). The SDL driver
++            // hides the desktop pointer only while it is over the game's window.
++            _emulation = true;
++            _show = false;
++
++            if ( SDL_ShowCursor( SDL_DISABLE ) < 0 ) {
++                ERROR_LOG( "Failed to disable cursor. The error description: " << SDL_GetError() )
++            }
++
++            return;
++#endif
+             _emulation = false;
+ 
+             const int returnCode = SDL_ShowCursor( _show ? SDL_ENABLE : SDL_DISABLE );
+@@ -1039,6 +1056,7 @@ namespace
+             _isVSyncEnabled = enable;
+ 
+             if ( _renderer == nullptr ) {
++                // Also RISC OS, which has no renderer: the window surface is plotted when updated.
+                 return;
+             }
+ 
+@@ -1088,6 +1106,16 @@ namespace
+ 
+         void clear() override
+         {
++#if defined( __riscos__ )
++            if ( _riscosEventWatch ) {
++                SDL_DelEventWatch( _riscosMouseWatch, this );
++                _riscosEventWatch = false;
++            }
++
++            // The window surface belongs to the window.
++            _riscosSurface = nullptr;
++#endif
++
+             if ( _texture != nullptr ) {
+                 SDL_DestroyTexture( _texture );
+                 _texture = nullptr;
+@@ -1120,6 +1148,10 @@ namespace
+ 
+         void render( const fheroes2::Display & display, const fheroes2::Rect & roi ) override
+         {
++#if defined( __riscos__ )
++            _riscosRender( display, roi );
++            return;
++#endif
+             if ( _surface == nullptr ) {
+                 return;
+             }
+@@ -1214,6 +1246,32 @@ namespace
+ 
+             _syncFullScreen();
+ 
++#if defined( __riscos__ )
++            // RISC OS has no accelerated SDL renderer (only the slow software one), so the
++            // 8-bit game screen is converted straight into the window's surface.
++            _riscosGameSize = { resolutionInfo.gameWidth, resolutionInfo.gameHeight };
++            if ( !_riscosAttachSurface() ) {
++                clear();
++                return false;
++            }
++
++            updatePalette( StandardPaletteIndexes() );
++
++            if ( !_retrieveWindowInfo() ) {
++                clear();
++                return false;
++            }
++
++            _toggleMouseCaptureMode();
++
++            if ( !_riscosEventWatch ) {
++                SDL_AddEventWatch( _riscosMouseWatch, this );
++                _riscosEventWatch = true;
++            }
++
++            return true;
++#endif
++
+             bool isPaletteModeSupported = false;
+ 
+             SDL_RendererInfo rendererInfo;
+@@ -1323,6 +1381,16 @@ namespace
+ 
+         void updatePalette( const std::vector<uint8_t> & colorIds ) override
+         {
++#if defined( __riscos__ )
++            if ( _riscosSurface == nullptr || colorIds.size() != 256 ) {
++                return;
++            }
++
++            _riscosColorIds = colorIds;
++            generatePalette( colorIds, _riscosSurface );
++            _riscosNeedFullFrame = true;
++            return;
++#endif
+             if ( _surface == nullptr || colorIds.size() != 256 )
+                 return;
+ 
+@@ -1395,6 +1463,229 @@ namespace
+             return true;
+         }
+ 
++#if defined( __riscos__ )
++        // RISC OS present path: the 8-bit game screen (game size) is converted through the
++        // palette into the window surface, scaled (nearest pixel, aspect kept, centred) when the
++        // window is bigger, and only the changed rectangle is updated. Mouse coordinates are
++        // mapped back to the game screen by an SDL event watch, as SDL's renderer does.
++        SDL_Surface * _riscosSurface{ nullptr };
++        fheroes2::Size _riscosGameSize;
++        fheroes2::Size _riscosSurfaceSize;
++        SDL_Rect _riscosDest{ 0, 0, 0, 0 };
++        std::vector<int32_t> _riscosXMap;
++        std::vector<int32_t> _riscosYMap;
++        std::vector<uint8_t> _riscosColorIds;
++        bool _riscosNeedFullFrame{ true };
++        bool _riscosEventWatch{ false };
++
++        bool _riscosAttachSurface()
++        {
++            SDL_Surface * surface = SDL_GetWindowSurface( _window );
++            if ( surface == nullptr ) {
++                ERROR_LOG( "Failed to get the window surface. The error: " << SDL_GetError() )
++                return false;
++            }
++
++            if ( surface->format->BitsPerPixel != 32 || surface->w <= 0 || surface->h <= 0 ) {
++                ERROR_LOG( "Unsupported window surface: " << SDL_GetPixelFormatName( surface->format->format ) << ", " << surface->w << " x " << surface->h )
++                return false;
++            }
++
++            if ( surface != _riscosSurface ) {
++                DEBUG_LOG( DBG_ENGINE, DBG_INFO,
++                           "Window surface " << surface->w << " x " << surface->h << ", " << SDL_GetPixelFormatName( surface->format->format ) << ", game screen "
++                                             << _riscosGameSize.width << " x " << _riscosGameSize.height )
++            }
++
++            const bool formatChanged = ( _riscosSurface == nullptr ) || ( _riscosSurface->format->format != surface->format->format );
++            _riscosSurface = surface;
++            _riscosSurfaceSize = { surface->w, surface->h };
++
++            if ( formatChanged && _riscosColorIds.size() == 256 ) {
++                // The pixel order may differ: rebuild the palette for the new surface.
++                generatePalette( _riscosColorIds, _riscosSurface );
++            }
++
++            // Scale to fit, keeping the aspect ratio, centred.
++            const int32_t gw = _riscosGameSize.width;
++            const int32_t gh = _riscosGameSize.height;
++            const int64_t sw = surface->w;
++            const int64_t sh = surface->h;
++
++            if ( sw * gh <= sh * gw ) {
++                _riscosDest.w = static_cast<int>( sw );
++                _riscosDest.h = static_cast<int>( sw * gh / gw );
++            }
++            else {
++                _riscosDest.h = static_cast<int>( sh );
++                _riscosDest.w = static_cast<int>( sh * gw / gh );
++            }
++            _riscosDest.w = std::max( _riscosDest.w, 1 );
++            _riscosDest.h = std::max( _riscosDest.h, 1 );
++            _riscosDest.x = static_cast<int>( ( sw - _riscosDest.w ) / 2 );
++            _riscosDest.y = static_cast<int>( ( sh - _riscosDest.h ) / 2 );
++
++            _riscosXMap.resize( static_cast<size_t>( _riscosDest.w ) );
++            for ( int32_t x = 0; x < _riscosDest.w; ++x ) {
++                _riscosXMap[x] = static_cast<int32_t>( static_cast<int64_t>( x ) * gw / _riscosDest.w );
++            }
++
++            _riscosYMap.resize( static_cast<size_t>( _riscosDest.h ) );
++            for ( int32_t y = 0; y < _riscosDest.h; ++y ) {
++                _riscosYMap[y] = static_cast<int32_t>( static_cast<int64_t>( y ) * gh / _riscosDest.h );
++            }
++
++            _riscosNeedFullFrame = true;
++
++            return true;
++        }
++
++        // First destination column (or row) whose source is at or after 'src'.
++        static int32_t _riscosScaleUp( const int32_t src, const int32_t destSize, const int32_t gameSize )
++        {
++            return static_cast<int32_t>( ( static_cast<int64_t>( src ) * destSize + gameSize - 1 ) / gameSize );
++        }
++
++        void _riscosRender( const fheroes2::Display & display, const fheroes2::Rect & roi )
++        {
++            if ( _window == nullptr || _riscosSurface == nullptr || display.empty() ) {
++                return;
++            }
++
++            // The surface is remade when the window changes size (full screen, resolution).
++            SDL_Surface * surface = SDL_GetWindowSurface( _window );
++            if ( surface == nullptr ) {
++                return;
++            }
++
++            if ( surface != _riscosSurface || surface->w != _riscosSurfaceSize.width || surface->h != _riscosSurfaceSize.height ) {
++                if ( !_riscosAttachSurface() ) {
++                    return;
++                }
++            }
++
++            const int32_t gw = _riscosGameSize.width;
++            const int32_t gh = _riscosGameSize.height;
++            if ( display.width() != gw || display.height() != gh || _palette32Bit.size() != 256 ) {
++                return;
++            }
++
++            const bool fullFrame = _riscosNeedFullFrame;
++            fheroes2::Rect area = fullFrame ? fheroes2::Rect( 0, 0, gw, gh ) : roi;
++            area.x = std::clamp( area.x, 0, gw );
++            area.y = std::clamp( area.y, 0, gh );
++            area.width = std::clamp( area.width, 0, gw - area.x );
++            area.height = std::clamp( area.height, 0, gh - area.y );
++
++            const int32_t dx0 = _riscosScaleUp( area.x, _riscosDest.w, gw );
++            const int32_t dx1 = _riscosScaleUp( area.x + area.width, _riscosDest.w, gw );
++            const int32_t dy0 = _riscosScaleUp( area.y, _riscosDest.h, gh );
++            const int32_t dy1 = _riscosScaleUp( area.y + area.height, _riscosDest.h, gh );
++
++            if ( SDL_MUSTLOCK( surface ) && SDL_LockSurface( surface ) < 0 ) {
++                ERROR_LOG( "Failed to lock the window surface. The error: " << SDL_GetError() )
++                return;
++            }
++
++            if ( fullFrame ) {
++                // Black borders around the scaled picture.
++                SDL_FillRect( surface, nullptr, SDL_MapRGB( surface->format, 0, 0, 0 ) );
++            }
++
++            const uint8_t * image = display.image();
++            const uint32_t * palette = _palette32Bit.data();
++            uint8_t * pixels = static_cast<uint8_t *>( surface->pixels );
++            const int pitch = surface->pitch;
++            const size_t rowBytes = static_cast<size_t>( dx1 - dx0 ) * 4;
++
++            int32_t previousSrcY = -1;
++            const uint32_t * previousRow = nullptr;
++
++            for ( int32_t dy = dy0; dy < dy1; ++dy ) {
++                // The pitch is a whole number of 32-bit pixels, so each row is word aligned.
++                uint32_t * out = static_cast<uint32_t *>( static_cast<void *>( pixels + static_cast<ptrdiff_t>( _riscosDest.y + dy ) * pitch ) ) + _riscosDest.x + dx0;
++                const int32_t srcY = _riscosYMap[dy];
++
++                if ( srcY == previousSrcY && previousRow != nullptr ) {
++                    // Scaled up: the same source row again.
++                    memcpy( out, previousRow, rowBytes );
++                    continue;
++                }
++
++                const uint8_t * in = image + static_cast<ptrdiff_t>( srcY ) * gw;
++                const int32_t * xMap = _riscosXMap.data();
++                for ( int32_t dx = dx0; dx < dx1; ++dx ) {
++                    out[dx - dx0] = palette[in[xMap[dx]]];
++                }
++
++                previousSrcY = srcY;
++                previousRow = out;
++            }
++
++            if ( SDL_MUSTLOCK( surface ) ) {
++                SDL_UnlockSurface( surface );
++            }
++
++            _riscosNeedFullFrame = false;
++
++            SDL_Rect update;
++            if ( fullFrame ) {
++                update = { 0, 0, surface->w, surface->h };
++            }
++            else {
++                update = { _riscosDest.x + dx0, _riscosDest.y + dy0, dx1 - dx0, dy1 - dy0 };
++            }
++
++            if ( update.w > 0 && update.h > 0 && SDL_UpdateWindowSurfaceRects( _window, &update, 1 ) < 0 ) {
++                ERROR_LOG( "Failed to update the window surface. The error: " << SDL_GetError() )
++            }
++        }
++
++        int32_t _riscosToGameX( const int32_t x ) const
++        {
++            if ( _riscosDest.w <= 0 ) {
++                return x;
++            }
++            const int64_t gx = static_cast<int64_t>( x - _riscosDest.x ) * _riscosGameSize.width / _riscosDest.w;
++            return static_cast<int32_t>( std::clamp<int64_t>( gx, 0, _riscosGameSize.width - 1 ) );
++        }
++
++        int32_t _riscosToGameY( const int32_t y ) const
++        {
++            if ( _riscosDest.h <= 0 ) {
++                return y;
++            }
++            const int64_t gy = static_cast<int64_t>( y - _riscosDest.y ) * _riscosGameSize.height / _riscosDest.h;
++            return static_cast<int32_t>( std::clamp<int64_t>( gy, 0, _riscosGameSize.height - 1 ) );
++        }
++
++        // Called by SDL before an event is queued (main thread): window -> game coordinates.
++        static int SDLCALL _riscosMouseWatch( void * userData, SDL_Event * event )
++        {
++            const RenderEngine * engine = static_cast<const RenderEngine *>( userData );
++
++            switch ( event->type ) {
++            case SDL_MOUSEMOTION:
++                event->motion.x = engine->_riscosToGameX( event->motion.x );
++                event->motion.y = engine->_riscosToGameY( event->motion.y );
++                if ( engine->_riscosDest.w > 0 && engine->_riscosDest.h > 0 ) {
++                    event->motion.xrel = event->motion.xrel * engine->_riscosGameSize.width / engine->_riscosDest.w;
++                    event->motion.yrel = event->motion.yrel * engine->_riscosGameSize.height / engine->_riscosDest.h;
++                }
++                break;
++            case SDL_MOUSEBUTTONDOWN:
++            case SDL_MOUSEBUTTONUP:
++                event->button.x = engine->_riscosToGameX( event->button.x );
++                event->button.y = engine->_riscosToGameY( event->button.y );
++                break;
++            default:
++                break;
++            }
++
++            return 1;
++        }
++#endif
++
+         void _toggleVSync()
+         {
+             assert( _renderer != nullptr );

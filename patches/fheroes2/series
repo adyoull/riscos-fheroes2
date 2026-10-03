@@ -1,0 +1,5 @@
+0001-Build-PTHREAD_FLAG-for-compilers-without-pthread-GCC.patch
+0002-RISC-OS-configuration-and-saves-in-Choices-case-inse.patch
+0003-RISC-OS-draw-straight-into-the-window-surface-softwa.patch
+0004-RISC-OS-output-to-a-log-file-heap-in-a-dynamic-area.patch
+0005-RISC-OS-waits-let-the-desktop-run-4096-sample-audio-.patch

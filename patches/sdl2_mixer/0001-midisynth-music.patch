@@ -1,0 +1,436 @@
+SDL_mixer: MIDI music through riscos-midisynth (RISC OS)
+
+RISC OS has no General MIDI synthesiser, so SDL_mixer's MIDI music needs
+a software one. This adds a music decoder, MUSIC_MID_MIDISYNTH, that plays
+MIDI files with riscos-midisynth (TinySoundFont), the library the OpenTTD
+port already uses. configure compiles every src/codecs/*.c, so it needs no
+build-system change: build with
+  CFLAGS += -DMUSIC_MID -DMUSIC_MID_MIDISYNTH  and link -lmidisynth.
+SoundFont: Mix_SetSoundFonts() (first entry), else midisynth's default
+(MIDISynth$SoundFont). No seeking.
+
+--- a/src/codecs/music_midisynth.c
++++ b/src/codecs/music_midisynth.c
+@@ -0,0 +1,366 @@
++/*
++  SDL_mixer:  An audio mixer library based on the SDL library
++  Copyright (C) 1997-2023 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++
++/* MIDI music through riscos-midisynth (TinySoundFont), for RISC OS, which
++   has no General MIDI synthesiser of its own. Added for the RISC OS port of
++   fheroes2 (riscos-fheroes2, 2026).
++
++   - One synth is shared by all music objects: loading a SoundFont takes a
++     while, so it is loaded once, the first time a MIDI file is opened, and
++     freed when the audio device closes. Play() loads that object's MIDI
++     data into the synth. SDL_mixer only ever plays one music at a time.
++   - SoundFont: Mix_SetSoundFonts() if set (the first file in the list),
++     otherwise midisynth's default (MIDISynth$SoundFont on RISC OS,
++     MIDISYNTH_SOUNDFONT elsewhere).
++   - No seeking: Seek fails, so Mix_FadeInMusicPos() reports an error and
++     the program can start the music from the beginning instead. Tell
++     counts the time rendered since Play.
++   - configure compiles every C file in src/codecs, so no build-system
++     change is needed: define MUSIC_MID_MIDISYNTH and link -lmidisynth. */
++
++#ifdef MUSIC_MID_MIDISYNTH
++
++#include "music_midisynth.h"
++#include "midisynth.h"
++
++typedef struct
++{
++    void *data;          /* the MIDI file */
++    int size;
++    int play_count;      /* -1 = for ever, 0 = finished */
++    int volume;
++    Uint64 frames;       /* rendered since Play */
++    SDL_AudioStream *stream;   /* NULL when the device is S16 stereo */
++    Sint16 *buffer;
++    int buffer_frames;
++} MIDISYNTH_Music;
++
++static midisynth *ms_synth = NULL;
++static void *ms_owner = NULL;      /* the music object loaded in the synth */
++static int ms_rate = 44100;
++
++static int MIDISYNTH_Open(const SDL_AudioSpec *spec)
++{
++    ms_rate = spec->freq;
++    if (ms_rate < 8000 || ms_rate > 96000) {
++        ms_rate = 44100;
++    }
++    return 0;
++}
++
++static void MIDISYNTH_Close(void)
++{
++    if (ms_synth) {
++        midisynth_destroy(ms_synth);
++        ms_synth = NULL;
++    }
++    ms_owner = NULL;
++}
++
++/* Load the SoundFont the first time it's needed. */
++static int MIDISYNTH_EnsureSynth(void)
++{
++    char font[1024];
++    const char *fonts;
++    midisynth_config config;
++
++    if (ms_synth) {
++        return 0;
++    }
++
++    midisynth_config_init(&config);
++    config.sample_rate = ms_rate;
++    fonts = Mix_GetSoundFonts();
++    if (fonts && *fonts) {
++        /* Mix_GetSoundFonts gives a ';'-separated list; use the first. */
++        size_t n = 0;
++        while (fonts[n] && fonts[n] != ';' && n < sizeof(font) - 1) {
++            font[n] = fonts[n];
++            ++n;
++        }
++        font[n] = '\0';
++        config.soundfont = font;
++    }
++    ms_synth = midisynth_create_ex(&config);
++    if (!ms_synth) {
++        return Mix_SetError("midisynth: %s", midisynth_last_error(NULL));
++    }
++    return 0;
++}
++
++static void MIDISYNTH_Delete(void *context);
++
++static void *MIDISYNTH_CreateFromRW(SDL_RWops *src, int freesrc)
++{
++    MIDISYNTH_Music *music;
++    size_t size;
++
++    if (MIDISYNTH_EnsureSynth() < 0) {
++        return NULL;
++    }
++
++    music = (MIDISYNTH_Music *)SDL_calloc(1, sizeof(*music));
++    if (!music) {
++        SDL_OutOfMemory();
++        return NULL;
++    }
++    music->volume = MIX_MAX_VOLUME;
++
++    music->data = SDL_LoadFile_RW(src, &size, SDL_FALSE);
++    if (!music->data || size == 0 || size > 0x7fffffff) {
++        Mix_SetError("midisynth: couldn't read the MIDI data");
++        MIDISYNTH_Delete(music);
++        return NULL;
++    }
++    /* A Standard MIDI File starts with an MThd chunk of at least 6 bytes.
++       (The rest is checked when it's played: loading it into the synth
++       now would stop the music that's playing.) */
++    if (size < 14 || SDL_memcmp(music->data, "MThd", 4) != 0) {
++        Mix_SetError("midisynth: not a MIDI file");
++        MIDISYNTH_Delete(music);
++        return NULL;
++    }
++    music->size = (int)size;
++
++    music->buffer_frames = music_spec.samples ? music_spec.samples : 1024;
++    if (music_spec.format != AUDIO_S16SYS || music_spec.channels != 2) {
++        music->stream = SDL_NewAudioStream(AUDIO_S16SYS, 2, ms_rate,
++                                           music_spec.format, music_spec.channels, music_spec.freq);
++        if (!music->stream) {
++            MIDISYNTH_Delete(music);
++            return NULL;
++        }
++        music->buffer = (Sint16 *)SDL_malloc((size_t)music->buffer_frames * 4);
++        if (!music->buffer) {
++            SDL_OutOfMemory();
++            MIDISYNTH_Delete(music);
++            return NULL;
++        }
++    }
++
++    if (freesrc) {
++        SDL_RWclose(src);
++    }
++    return music;
++}
++
++static void MIDISYNTH_SetVolume(void *context, int volume)
++{
++    MIDISYNTH_Music *music = (MIDISYNTH_Music *)context;
++    music->volume = volume;
++}
++
++static int MIDISYNTH_GetVolume(void *context)
++{
++    MIDISYNTH_Music *music = (MIDISYNTH_Music *)context;
++    return music->volume;
++}
++
++static int MIDISYNTH_Start(MIDISYNTH_Music *music)
++{
++    if (!midisynth_load_memory(ms_synth, music->data, music->size)) {
++        ms_owner = NULL;
++        return Mix_SetError("midisynth: %s", midisynth_last_error(ms_synth));
++    }
++    ms_owner = music;
++    midisynth_set_loop(ms_synth, 0);
++    midisynth_play(ms_synth);
++    music->frames = 0;
++    return 0;
++}
++
++static int MIDISYNTH_Play(void *context, int play_count)
++{
++    MIDISYNTH_Music *music = (MIDISYNTH_Music *)context;
++    if (!ms_synth) {
++        return Mix_SetError("midisynth: no synth");
++    }
++    music->play_count = play_count;
++    if (music->stream) {
++        SDL_AudioStreamClear(music->stream);
++    }
++    return MIDISYNTH_Start(music);
++}
++
++static SDL_bool MIDISYNTH_IsPlaying(void *context)
++{
++    MIDISYNTH_Music *music = (MIDISYNTH_Music *)context;
++    return (music->play_count != 0 && ms_owner == music) ? SDL_TRUE : SDL_FALSE;
++}
++
++/* At the end of the song: start again or finish. */
++static int MIDISYNTH_SongEnded(MIDISYNTH_Music *music)
++{
++    if (music->play_count == 1) {
++        music->play_count = 0;
++        return 0;
++    }
++    if (music->play_count > 0) {
++        --music->play_count;
++    }
++    return MIDISYNTH_Start(music);
++}
++
++static int MIDISYNTH_GetSome(void *context, void *data, int bytes, SDL_bool *done)
++{
++    MIDISYNTH_Music *music = (MIDISYNTH_Music *)context;
++    int frames;
++
++    if (music->stream) {
++        int filled = SDL_AudioStreamGet(music->stream, data, bytes);
++        if (filled != 0) {
++            return filled;
++        }
++    }
++
++    if (music->play_count == 0 || ms_owner != music) {
++        *done = SDL_TRUE;
++        return 0;
++    }
++
++    if (!midisynth_playing(ms_synth)) {
++        if (MIDISYNTH_SongEnded(music) < 0) {
++            return -1;
++        }
++        if (music->play_count == 0) {
++            *done = SDL_TRUE;
++            return 0;
++        }
++    }
++
++    if (music->stream) {
++        frames = music->buffer_frames;
++        midisynth_render(ms_synth, music->buffer, frames, 0);
++        music->frames += (Uint64)frames;
++        if (SDL_AudioStreamPut(music->stream, music->buffer, frames * 4) < 0) {
++            return -1;
++        }
++        return 0;   /* picked up from the stream next time round */
++    }
++
++    frames = bytes / 4;
++    if (frames <= 0) {
++        return 0;
++    }
++    midisynth_render(ms_synth, (Sint16 *)data, frames, 0);
++    music->frames += (Uint64)frames;
++    return frames * 4;
++}
++
++static int MIDISYNTH_GetAudio(void *context, void *data, int bytes)
++{
++    MIDISYNTH_Music *music = (MIDISYNTH_Music *)context;
++    return music_pcm_getaudio(context, data, bytes, music->volume, MIDISYNTH_GetSome);
++}
++
++static int MIDISYNTH_Seek(void *context, double position)
++{
++    (void)context;
++    if (position <= 0.0) {
++        return 0;   /* Play() always starts at the beginning */
++    }
++    return Mix_SetError("midisynth: seeking isn't supported");
++}
++
++static double MIDISYNTH_Tell(void *context)
++{
++    MIDISYNTH_Music *music = (MIDISYNTH_Music *)context;
++    return (double)music->frames / (double)ms_rate;
++}
++
++static void MIDISYNTH_Pause(void *context)
++{
++    MIDISYNTH_Music *music = (MIDISYNTH_Music *)context;
++    if (ms_synth && ms_owner == music) {
++        midisynth_pause(ms_synth);
++    }
++}
++
++static void MIDISYNTH_Resume(void *context)
++{
++    MIDISYNTH_Music *music = (MIDISYNTH_Music *)context;
++    if (ms_synth && ms_owner == music) {
++        midisynth_play(ms_synth);
++    }
++}
++
++static void MIDISYNTH_Stop(void *context)
++{
++    MIDISYNTH_Music *music = (MIDISYNTH_Music *)context;
++    if (ms_synth && ms_owner == music) {
++        midisynth_stop(ms_synth);
++        ms_owner = NULL;
++    }
++    music->play_count = 0;
++}
++
++static void MIDISYNTH_Delete(void *context)
++{
++    MIDISYNTH_Music *music = (MIDISYNTH_Music *)context;
++
++    if (ms_synth && ms_owner == music) {
++        midisynth_stop(ms_synth);
++        ms_owner = NULL;
++    }
++    if (music->stream) {
++        SDL_FreeAudioStream(music->stream);
++    }
++    SDL_free(music->buffer);
++    SDL_free(music->data);
++    SDL_free(music);
++}
++
++Mix_MusicInterface Mix_MusicInterface_MIDISYNTH =
++{
++    "MIDISYNTH",
++    MIX_MUSIC_TIMIDITY,     /* there is no API value of its own */
++    MUS_MID,
++    SDL_FALSE,
++    SDL_FALSE,
++
++    NULL,   /* Load */
++    MIDISYNTH_Open,
++    MIDISYNTH_CreateFromRW,
++    NULL,   /* CreateFromFile */
++    MIDISYNTH_SetVolume,
++    MIDISYNTH_GetVolume,
++    MIDISYNTH_Play,
++    MIDISYNTH_IsPlaying,
++    MIDISYNTH_GetAudio,
++    NULL,   /* Jump */
++    MIDISYNTH_Seek,
++    MIDISYNTH_Tell,
++    NULL,   /* Duration */
++    NULL,   /* LoopStart */
++    NULL,   /* LoopEnd */
++    NULL,   /* LoopLength */
++    NULL,   /* GetMetaTag */
++    MIDISYNTH_Pause,
++    MIDISYNTH_Resume,
++    MIDISYNTH_Stop,
++    MIDISYNTH_Delete,
++    MIDISYNTH_Close,
++    NULL    /* Unload */
++};
++
++#endif /* MUSIC_MID_MIDISYNTH */
++
++/* vi: set ts=4 sw=4 expandtab: */
+--- a/src/codecs/music_midisynth.h
++++ b/src/codecs/music_midisynth.h
+@@ -0,0 +1,28 @@
++/*
++  SDL_mixer:  An audio mixer library based on the SDL library
++  Copyright (C) 1997-2023 Sam Lantinga <slouken@libsdl.org>
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++*/
++
++/* MIDI music through riscos-midisynth (RISC OS port of fheroes2, 2026) */
++
++#include "music.h"
++
++extern Mix_MusicInterface Mix_MusicInterface_MIDISYNTH;
++
++/* vi: set ts=4 sw=4 expandtab: */
+--- a/src/music.c
++++ b/src/music.c
+@@ -33,6 +33,7 @@
+ #include "music_nativemidi.h"
+ #include "music_fluidsynth.h"
+ #include "music_timidity.h"
++#include "music_midisynth.h"
+ #include "music_ogg.h"
+ #include "music_opus.h"
+ #include "music_drmp3.h"
+@@ -188,6 +189,9 @@
+ #ifdef MUSIC_MOD_MODPLUG
+     &Mix_MusicInterface_MODPLUG,
+ #endif
++#ifdef MUSIC_MID_MIDISYNTH
++    &Mix_MusicInterface_MIDISYNTH,
++#endif
+ #ifdef MUSIC_MID_FLUIDSYNTH
+     &Mix_MusicInterface_FLUIDSYNTH,
+ #endif
+@@ -1472,3 +1476,4 @@
+ }
+ 
+ /* vi: set ts=4 sw=4 expandtab: */
++

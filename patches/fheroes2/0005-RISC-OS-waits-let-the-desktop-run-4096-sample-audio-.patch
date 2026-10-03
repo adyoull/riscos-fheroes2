@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <adyoull@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 22:56:03 +0100
+Subject: [PATCH] RISC OS: waits let the desktop run; 4096-sample audio buffer
+
+- fheroes2::delayforMs() uses SDL_Delay on RISC OS. UnixLib's
+  std::this_thread::sleep_for spins without polling the Wimp, so the
+  desktop froze during battle animation pauses; the SDL driver's
+  SDL_Delay waits in Wimp_PollIdle when the game is in a window.
+- SDL_mixer gets a 4096-sample buffer: RISC OS threads share one core and
+  are switched by a timer, so SDL's audio thread can run late (same value
+  as the Freeciv port).
+---
+ src/engine/audio.cpp  |  4 ++++
+ src/engine/timing.cpp | 22 ++++++++++++++++++++++
+ 2 files changed, 26 insertions(+)
+
+diff --git a/src/engine/audio.cpp b/src/engine/audio.cpp
+index 941842f..be9cd7c 100644
+--- a/src/engine/audio.cpp
++++ b/src/engine/audio.cpp
+@@ -80,6 +80,10 @@ namespace
+ #if defined( ANDROID ) || defined( __IPHONEOS__ )
+         // Value greater than 1024 causes audio distortion on Android and on iOS.
+         int chunkSize = 1024;
++#elif defined( __riscos__ )
++        // RISC OS: threads share one core and are switched by a timer, so SDL's audio thread
++        // can be late; a bigger buffer avoids gaps (as in the Freeciv port).
++        int chunkSize = 4096;
+ #elif defined( __EMSCRIPTEN__ )
+         // When a WebAssembly app is running in a browser, no background threads (emulated by the web workers) have
+         // access to the audio. The audio can only be accessed (and feeded) from the main thread (when yielding to
+diff --git a/src/engine/timing.cpp b/src/engine/timing.cpp
+index 7050f23..292e7ec 100644
+--- a/src/engine/timing.cpp
++++ b/src/engine/timing.cpp
+@@ -22,10 +22,32 @@
+ 
+ #include "timing.h"
+ 
++#if defined( __riscos__ )
++// Managing compiler warnings for SDL headers
++#if defined( __GNUC__ )
++#pragma GCC diagnostic push
++
++#pragma GCC diagnostic ignored "-Wswitch-default"
++#endif
++
++#include <SDL_timer.h>
++
++// Managing compiler warnings for SDL headers
++#if defined( __GNUC__ )
++#pragma GCC diagnostic pop
++#endif
++#endif
++
+ namespace fheroes2
+ {
+     void delayforMs( const uint32_t delayMs )
+     {
++#if defined( __riscos__ )
++        // RISC OS: UnixLib's sleep_for spins without letting other desktop programs run;
++        // the SDL driver's SDL_Delay waits in Wimp_PollIdle (main thread, in a window).
++        SDL_Delay( delayMs );
++#else
+         std::this_thread::sleep_for( std::chrono::milliseconds( delayMs ) );
++#endif
+     }
+ }

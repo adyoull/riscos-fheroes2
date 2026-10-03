@@ -1,0 +1,147 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <adyoull@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 22:56:03 +0100
+Subject: [PATCH] RISC OS: output to a log file, heap in a dynamic area
+
+- A desktop program must not print (text would appear over the
+  desktop): stdout and stderr go to the file named by fheroes2$Log, or
+  nowhere when it isn't set. RISC OS allows only one open for writing,
+  so the file is opened once for stderr and stdout shares the handle.
+- The C heap goes in the dynamic area "fheroes2 Heap" (UnixLib), so
+  the WimpSlot only needs to hold the program.
+---
+ src/engine/riscos.cpp          | 60 ++++++++++++++++++++++++++++++++++
+ src/engine/riscos.h            | 31 ++++++++++++++++++
+ src/fheroes2/game/fheroes2.cpp |  7 ++++
+ 3 files changed, 98 insertions(+)
+ create mode 100644 src/engine/riscos.cpp
+ create mode 100644 src/engine/riscos.h
+
+diff --git a/src/engine/riscos.cpp b/src/engine/riscos.cpp
+new file mode 100644
+index 0000000..bf05b1c
+--- /dev/null
++++ b/src/engine/riscos.cpp
+@@ -0,0 +1,60 @@
++/***************************************************************************
++ *   fheroes2: https://github.com/ihhub/fheroes2                           *
++ *   Copyright (C) 2026                                                    *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program; if not, write to the                         *
++ *   Free Software Foundation, Inc.,                                       *
++ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
++ ***************************************************************************/
++
++#if defined( __riscos__ )
++
++#include "riscos.h"
++
++#include <cstdio>
++#include <cstdlib>
++
++#include <unistd.h>
++
++// UnixLib: the C heap goes in a dynamic area with this name, so the WimpSlot only has
++// to hold the program. UnixLib 5.0.3.1 adds more areas ("fheroes2 Heap 2"...) if one
++// isn't enough, and removes them all when the program ends.
++// (Declared, extern and weak, in UnixLib's features.h.)
++const char * const __dynamic_da_name = "fheroes2 Heap";
++int __dynamic_da_max_size = 512 * 1024 * 1024;
++
++void RiscOS::redirectOutput()
++{
++    const char * name = getenv( "fheroes2$Log" );
++    if ( name == nullptr || *name == '\0' ) {
++        name = "/dev/null";
++    }
++
++    // RISC OS lets a file be opened for writing only once, so open it for stderr and
++    // give stdout the same handle.
++    if ( freopen( name, "w", stderr ) != nullptr ) {
++        setvbuf( stderr, nullptr, _IOLBF, 0 );
++        fflush( stdout );
++        if ( dup2( fileno( stderr ), fileno( stdout ) ) >= 0 ) {
++            return;
++        }
++        (void)freopen( "/dev/null", "w", stdout );
++        return;
++    }
++
++    (void)freopen( "/dev/null", "w", stdout );
++    (void)freopen( "/dev/null", "w", stderr );
++}
++
++#endif
+diff --git a/src/engine/riscos.h b/src/engine/riscos.h
+new file mode 100644
+index 0000000..04c9327
+--- /dev/null
++++ b/src/engine/riscos.h
+@@ -0,0 +1,31 @@
++/***************************************************************************
++ *   fheroes2: https://github.com/ihhub/fheroes2                           *
++ *   Copyright (C) 2026                                                    *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program; if not, write to the                         *
++ *   Free Software Foundation, Inc.,                                       *
++ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
++ ***************************************************************************/
++
++#pragma once
++
++#if defined( __riscos__ )
++namespace RiscOS
++{
++    // A desktop program must not print: text would appear over the desktop.
++    // Sends stdout and stderr to the file named by fheroes2$Log (a UnixLib
++    // file name), or nowhere when it isn't set.
++    void redirectOutput();
++}
++#endif
+diff --git a/src/fheroes2/game/fheroes2.cpp b/src/fheroes2/game/fheroes2.cpp
+index 393ad06..77ca6e2 100644
+--- a/src/fheroes2/game/fheroes2.cpp
++++ b/src/fheroes2/game/fheroes2.cpp
+@@ -68,6 +68,9 @@
+ #include "game_logo.h"
+ #include "game_video.h"
+ #include "game_video_type.h"
++#if defined( __riscos__ )
++#include "riscos.h"
++#endif
+ #include "h2d.h"
+ #include "icn.h"
+ #include "image.h"
+@@ -294,6 +297,10 @@ int main( int argc, char ** argv )
+     (void)argc;
+ #endif
+ 
++#if defined( __riscos__ )
++    RiscOS::redirectOutput();
++#endif
++
+     try {
+         const fheroes2::HardwareInitializer hardwareInitializer;
+         Logging::InitLog();

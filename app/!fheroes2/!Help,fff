@@ -1,0 +1,92 @@
+fheroes2 for RISC OS
+====================
+
+fheroes2 is a free, open source re-creation of the game engine of
+Heroes of Might and Magic II. This is a port of fheroes2 to RISC OS 5
+(tested on the Raspberry Pi 4). It runs in a desktop window or full
+screen.
+
+Version: see the Version file in the docs directory.
+
+
+You need the original game's data
+---------------------------------
+fheroes2 is only the engine. You need the data from the original game
+(GOG or CD) or from the free demo:
+
+  https://archive.org/download/HeroesofMightandMagicIITheSuccessionWars_1020/h2demo.zip
+
+From the game (or the demo zip), copy the DATA and MAPS directories
+(and ANIM and MUSIC if you have them) into !fheroes2, next to !Run.
+To open the application directory, hold Shift and double-click it.
+
+Or put them anywhere you like and set fheroes2$Data to that directory,
+for example in your !Boot:
+
+  Set fheroes2$Data ADFS::HardDisc4.$.Games.HoMM2
+
+The demo has one map (Broken Alliance); the full game has the
+campaigns and all the maps.
+
+
+Requirements
+------------
+- RISC OS 5 on an ARMv7 machine (Raspberry Pi 2 or later recommended)
+- For sound: SharedSoundBuffer and StreamManager, in ssb.zip from
+    https://orac.co.uk/software/rdpclient/rdpclient.html
+  (merge its !System with yours). SharedSound is part of RISC OS. John
+  Duffell's own site (now on the Internet Archive) has more details:
+    https://web.archive.org/web/20110920080106/http://www.duffell.riscos.me.uk/
+  Without them the game plays silently.
+- The ARMEABISupport module and SharedUnixLibrary 1.16 or later (both
+  can be installed with !PackMan).
+- PThreadTicker 0.03 (from UnixLib 5.0.3.1) is included; !Run loads it
+  unless your !System already has it.
+
+
+Playing
+-------
+- Double-click !fheroes2. The game opens a 640 x 480 window; choose a
+  bigger resolution in the game's System options ("Resolution").
+- Full screen: F4, or in the game's graphics settings. The game
+  stays a desktop task in full screen.
+- The game draws its own mouse pointer, so the desktop pointer is
+  hidden while it is over the game window.
+- Quit from the game's menu, the window's close icon, or the icon bar.
+
+
+Where things are saved
+----------------------
+Settings, saved games and the log of high scores go in
+<Choices$Write>.fheroes2.
+
+
+Music
+-----
+The original game's music is MIDI. RISC OS has no MIDI synthesiser, so
+the game plays it with its own one (riscos-midisynth, TinySoundFont)
+and the SoundFont in files.soundfonts (TimGM6mb). You can put another
+.sf2 file there instead. The GOG version's OGG music tracks aren't
+supported yet.
+
+
+Logging
+-------
+Test builds write a log to <Wimp$ScrapDir>.fheroes2log. If something
+goes wrong, please send it along with what you did. To turn it off,
+edit !Run (see the Logging section).
+
+
+Licences
+--------
+fheroes2 is free software under the GNU General Public License, version
+2 or later; see docs.COPYING. This port's changes are in docs.patches.
+It also contains SDL2 and riscos-mesa's RISC OS drivers (zlib licence),
+SDL2_mixer (zlib licence), riscos-midisynth (MIT) with TinySoundFont
+(MIT), UnixLib, and the TimGM6mb SoundFont (GPL 2). See docs.Licences.
+
+Heroes of Might and Magic is a trademark of its owners. This port isn't
+connected with them; it doesn't include any of the original game.
+
+Ported by Andrew Youll. Parts of this port were written with the help
+of an AI assistant.
