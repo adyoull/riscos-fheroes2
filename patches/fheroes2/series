@@ -3,3 +3,4 @@
 0003-RISC-OS-draw-straight-into-the-window-surface-softwa.patch
 0004-RISC-OS-output-to-a-log-file-heap-in-a-dynamic-area.patch
 0005-RISC-OS-waits-let-the-desktop-run-4096-sample-audio-.patch
+0006-RISC-OS-ignore-the-SDL-driver-s-key-repeats-on-every.patch

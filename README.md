@@ -25,6 +25,7 @@ the application's `!Help`.
   | 0003 | Draw straight into the window surface (no accelerated renderer); scaling; software cursor |
   | 0004 | Output to `fheroes2$Log`, never the screen; heap in a dynamic area |
   | 0005 | Waits that let the desktop run; 4096-sample audio buffer |
+  | 0006 | Ignore the SDL driver's per-poll key repeats (desktop auto-repeat timing instead) |
 
 - The program is linked statically and converted to an Absolute (AIF)
   file with elf2aif, so `!SharedLibs` isn't needed.

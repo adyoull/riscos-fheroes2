@@ -1,6 +1,15 @@
 # riscos-fheroes2 changes
 
-## 1.1.17-riscos1test (unreleased, first test build)
+## 1.1.17-riscos2test (unreleased)
+
+- Escape (and any other key) acted several times per press: the quit
+  dialog flashed up and closed again. SDL's RISC OS driver sends another
+  key-down for every key still held each time the game polls; those
+  repeats are now only accepted at the desktop's own auto-repeat delay and
+  rate (*Configure Delay/Repeat) (new patch 0006). The proper fix belongs
+  in the SDL driver and has been passed to riscos-mesa.
+
+## 1.1.17-riscos1test (first test build)
 
 First RISC OS build of fheroes2 1.1.17, for testing on a Raspberry Pi.
 

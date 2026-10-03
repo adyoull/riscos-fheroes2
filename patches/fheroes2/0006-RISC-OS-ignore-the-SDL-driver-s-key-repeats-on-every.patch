@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <adyoull@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 23:42:15 +0100
+Subject: [PATCH] RISC OS: ignore the SDL driver's key repeats on every poll
+
+SDL 2.26's RISC OS driver scans the keyboard (OS_Byte 121) on every
+event poll and sends another SDL_KEYDOWN, marked as a repeat, for each
+key still held. fheroes2 handles repeats like presses, so a normal tap of
+Escape that lasted a few frames opened the quit dialog and closed it
+again at once (or after a few more frames).
+
+On RISC OS repeated key downs are now let through only as the desktop's
+auto-repeat would make them: after the *Configure Delay time, then at the
+*Configure Repeat rate (read with OS_Byte 196). With auto-repeat off,
+none are.
+---
+ src/engine/localevent.cpp | 76 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 76 insertions(+)
+
+diff --git a/src/engine/localevent.cpp b/src/engine/localevent.cpp
+index 11d4aa3..556fed0 100644
+--- a/src/engine/localevent.cpp
++++ b/src/engine/localevent.cpp
+@@ -65,10 +65,80 @@
+ #include "render_processor.h"
+ #include "screen.h"
+ 
++#if defined( __riscos__ )
++#include <kernel.h>
++#endif
++
+ namespace
+ {
+     const uint32_t globalLoopSleepTime{ 1 };
+ 
++#if defined( __riscos__ )
++    // RISC OS: SDL's RISC OS driver scans the keyboard on every poll and sends another
++    // SDL_KEYDOWN (with 'repeat' set) for every key still held, so a tap of Escape that
++    // spans a few frames opened a dialog and closed it again. Repeats are let through
++    // only as the desktop's own auto-repeat would make them: after the delay set by
++    // *Configure Delay, then at the *Configure Repeat rate (OS_Byte 196, centiseconds).
++    class KeyRepeatFilter
++    {
++    public:
++        // Returns true if this key down event should be handled.
++        bool accept( const SDL_KeyboardEvent & event )
++        {
++            const uint32_t now = SDL_GetTicks();
++
++            if ( event.repeat == 0 || event.keysym.sym != _key ) {
++                // A new press. (A repeat of another key than the last one pressed is
++                // treated as a new press of that key only if it wasn't a repeat.)
++                if ( event.repeat != 0 ) {
++                    return false;
++                }
++
++                _key = event.keysym.sym;
++                _pressTime = now;
++                _lastRepeatTime = now;
++                _readSettings();
++                return true;
++            }
++
++            if ( _delayMs == 0 || _rateMs == 0 ) {
++                // Auto-repeat is off.
++                return false;
++            }
++
++            if ( now - _pressTime < _delayMs || now - _lastRepeatTime < _rateMs ) {
++                return false;
++            }
++
++            _lastRepeatTime = now;
++            return true;
++        }
++
++    private:
++        SDL_Keycode _key{ SDLK_UNKNOWN };
++        uint32_t _pressTime{ 0 };
++        uint32_t _lastRepeatTime{ 0 };
++        uint32_t _delayMs{ 0 };
++        uint32_t _rateMs{ 0 };
++
++        void _readSettings()
++        {
++            // OS_Byte 196 with EOR 0, AND 255 reads: R1 = delay, R2 = rate (centiseconds).
++            const int result = _kernel_osbyte( 196, 0, 255 );
++            if ( result < 0 ) {
++                _delayMs = 500;
++                _rateMs = 100;
++                return;
++            }
++
++            _delayMs = static_cast<uint32_t>( result & 0xff ) * 10;
++            _rateMs = static_cast<uint32_t>( ( result >> 8 ) & 0xff ) * 10;
++        }
++    };
++
++    KeyRepeatFilter keyRepeatFilter;
++#endif
++
+     // If such or more ms has passed after pressing the mouse button, then this is a long press.
+     const uint32_t mouseButtonLongPressTimeout{ 850 };
+ 
+@@ -934,6 +1004,12 @@ namespace EventProcessing
+                 return;
+             }
+ 
++#if defined( __riscos__ )
++            if ( event.type == SDL_KEYDOWN && !keyRepeatFilter.accept( event ) ) {
++                return;
++            }
++#endif
++
+             LocalEvent::KeyboardEventState state = LocalEvent::KeyboardEventState::KEY_UNKNOWN;
+             switch ( event.type ) {
+             case SDL_KEYDOWN:
