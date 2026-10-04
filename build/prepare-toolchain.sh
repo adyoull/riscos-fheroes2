@@ -8,7 +8,7 @@
 #      libtool's own test links ask for;
 #   4. unpack the riscos-mesa devkit into $DEVKIT.
 # Needs in $DL: riscos-crossdev-toolchain-1.2-x86_64-linux.tar.xz and
-# riscos-mesa-devkit-12a.tgz (both in build/SHA256SUMS.txt).
+# riscos-mesa-devkit-12e.tgz (both in build/SHA256SUMS.txt).
 set -e
 . "$(dirname "$0")/env.sh"
 

@@ -1,6 +1,13 @@
 # riscos-fheroes2 changes
 
-## 1.1.17-riscos2test (unreleased)
+## 1.1.17-riscos3test (unreleased)
+
+- Linked with the riscos-mesa devkit 12e, whose SDL driver now sends one
+  key-down per press and repeats held keys at the desktop's auto-repeat
+  delay and rate (riscos-mesa's fix for the Escape problem below). Patch
+  0006, this port's stop-gap for the same thing, is removed.
+
+## 1.1.17-riscos2test
 
 - Escape (and any other key) acted several times per press: the quit
   dialog flashed up and closed again. SDL's RISC OS driver sends another

@@ -11,7 +11,7 @@ the application's `!Help`.
 
 - **Toolchain:** [riscos-crossdev](https://github.com/adyoull/riscos-crossdev)
   1.2 (GCCSDK GCC 10.2, UnixLib 5.0.3.1, PThreadTicker 0.03).
-- **SDL2:** the riscos-mesa devkit 12a (SDL 2.26 with the RISC OS video
+- **SDL2:** the riscos-mesa devkit 12e (SDL 2.26 with the RISC OS video
   and SharedSoundBuffer sound drivers), used as it is.
 - **SDL2_mixer 2.6.3**, WAV and MIDI, with a new decoder that plays MIDI
   through [riscos-midisynth](https://github.com/adyoull/riscos-midisynth)
@@ -25,7 +25,6 @@ the application's `!Help`.
   | 0003 | Draw straight into the window surface (no accelerated renderer); scaling; software cursor |
   | 0004 | Output to `fheroes2$Log`, never the screen; heap in a dynamic area |
   | 0005 | Waits that let the desktop run; 4096-sample audio buffer |
-  | 0006 | Ignore the SDL driver's per-poll key repeats (desktop auto-repeat timing instead) |
 
 - The program is linked statically and converted to an Absolute (AIF)
   file with elf2aif, so `!SharedLibs` isn't needed.

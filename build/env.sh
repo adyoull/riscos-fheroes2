@@ -12,14 +12,14 @@
 RFH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 : "${GCCSDK_ENV:=/opt/rx/riscos-crossdev-toolchain-1.2-x86_64-linux}"
-: "${DEVKIT:=/opt/dk/riscos-mesa-devkit-12a}"
+: "${DEVKIT:=/opt/dk/riscos-mesa-devkit-12e}"
 : "${DL:=$RFH_ROOT/dl}"
 : "${SRC:=$RFH_ROOT/src}"
 : "${STAGE:=$RFH_ROOT/stage}"
 : "${JOBS:=$(nproc)}"
 
 FHEROES2_VERSION=1.1.17
-RISCOS_REL=riscos2test
+RISCOS_REL=riscos3test
 MIXER_VERSION=2.6.3
 MIDISYNTH_VERSION=0.4.2
 
