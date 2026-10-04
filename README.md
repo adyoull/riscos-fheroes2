@@ -34,7 +34,7 @@ See [BUILDING.md](BUILDING.md) for the steps and checks, and
 
 ## Licence
 
-fheroes2 is GPL 2 or later, and so is this port's work on it. The build
+fheroes2 is GPL 2 or later, and so is this port's work on it (see COPYING). The build
 scripts and tools are under the same licence. SDL2 and SDL2_mixer are
 zlib-licensed, riscos-midisynth and TinySoundFont MIT, the TimGM6mb
 SoundFont GPL 2. The application's `docs.licences` has every notice.
