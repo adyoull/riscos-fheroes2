@@ -1,6 +1,15 @@
 # riscos-fheroes2 changes
 
-## 1.1.17-riscos4test (unreleased)
+## 1.1.17-riscos5test (unreleased)
+
+- Built with the released riscos-mesa devkit **20.3.5-12** instead of the
+  interim 12f, so the build can be made from public files. Its SDL code
+  is identical to 12f's, so nothing changes when playing.
+- riscos-mesa confirmed on the Pi: one key-down per press (Escape opens
+  the quit dialog and it stays), title-bar and border clicks no longer
+  reach the game, and the pointer row is no longer one out.
+
+## 1.1.17-riscos4test
 
 Relinked with the newest released libraries; the game's own code is
 unchanged.

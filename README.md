@@ -11,7 +11,7 @@ the application's `!Help`.
 
 - **Toolchain:** [riscos-crossdev](https://github.com/adyoull/riscos-crossdev)
   1.3 (GCCSDK GCC 10.2, UnixLib 5.0.3.2, PThreadTicker 0.03; static only).
-- **SDL2:** the riscos-mesa devkit 12f (SDL 2.26 with the RISC OS video
+- **SDL2:** the riscos-mesa devkit 20.3.5-12 (SDL 2.26 with the RISC OS video
   and SharedSoundBuffer sound drivers), used as it is.
 - **SDL2_mixer 2.6.3**, WAV and MIDI, with a new decoder that plays MIDI
   through [riscos-midisynth](https://github.com/adyoull/riscos-midisynth)
