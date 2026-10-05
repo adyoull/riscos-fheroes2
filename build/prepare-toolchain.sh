@@ -1,18 +1,18 @@
 #!/bin/bash
 # Set up the cross toolchain and the devkit:
-#   1. unpack riscos-crossdev's prebuilt toolchain 1.2 (GCC 10.2, UnixLib
-#      5.0.3.1, PThreadTicker 0.03) into $GCCSDK_ENV;
+#   1. unpack riscos-crossdev's prebuilt toolchain (1.3: GCC 10.2, UnixLib
+#      5.0.3.2, PThreadTicker 0.03) into $GCCSDK_ENV;
 #   2. delete libtool .la files: they hold the build machine's absolute
 #      paths, which break libtool links once the toolchain has moved;
-#   3. delete the shared libraries (static only), except libgcc_s, which
-#      libtool's own test links ask for;
+#   3. delete any shared libraries (static only), except libgcc_s, which
+#      libtool's own test links ask for (1.3 has none: it is static only);
 #   4. unpack the riscos-mesa devkit into $DEVKIT.
-# Needs in $DL: riscos-crossdev-toolchain-1.2-x86_64-linux.tar.xz and
-# riscos-mesa-devkit-12e.tgz (both in build/SHA256SUMS.txt).
+# Needs in $DL: $(basename $GCCSDK_ENV).tar.xz and $(basename $DEVKIT).tgz
+# (both in build/SHA256SUMS.txt; see build/env.sh for the versions).
 set -e
 . "$(dirname "$0")/env.sh"
 
-TC=riscos-crossdev-toolchain-1.2-x86_64-linux
+TC=$(basename "$GCCSDK_ENV")
 check_sha "$DL/$TC.tar.xz"
 parent=$(dirname "$GCCSDK_ENV")
 mkdir -p "$parent"

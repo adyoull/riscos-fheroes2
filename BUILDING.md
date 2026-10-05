@@ -10,8 +10,8 @@ Put these in `dl/` (their SHA-256 sums are in `build/SHA256SUMS.txt`):
 
 | File | From |
 |---|---|
-| `riscos-crossdev-toolchain-1.2-x86_64-linux.tar.xz` | riscos-crossdev release 1.2 |
-| `riscos-mesa-devkit-12e.tgz` | riscos-mesa |
+| `riscos-crossdev-toolchain-1.3-x86_64-linux.tar.xz` | riscos-crossdev release 1.3 |
+| `riscos-mesa-devkit-12f.tgz` | riscos-mesa |
 | `fheroes2-1.1.17.tar.gz` | `git archive --prefix=fheroes2-1.1.17/` of tag 1.1.17 (2685c21) |
 | `SDL2_mixer-2.6.3.tar.gz` | libsdl.org release |
 | `riscos-midisynth-0.4.2.tar.gz` | `git archive --prefix=riscos-midisynth-0.4.2/` of riscos-midisynth 0.4.2 (628e4b6) |
@@ -33,7 +33,7 @@ rebuilds the existing tree (only what changed).
 
 ## Checks (package.sh runs them)
 
-- `tools/check-unixlib.sh`: the program has UnixLib 5.0.3.1's 640-byte
+- `tools/check-unixlib.sh`: the program has UnixLib 5.0.3.1+'s 640-byte
   pthread ticker block, consistently.
 - `tools/check-stack-probes.py`: every function with a stack frame of
   4 KB or more probes the stack (`-fstack-clash-protection`).

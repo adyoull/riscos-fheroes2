@@ -1,6 +1,23 @@
 # riscos-fheroes2 changes
 
-## 1.1.17-riscos3test (unreleased)
+## 1.1.17-riscos4test (unreleased)
+
+Relinked with the newest released libraries; the game's own code is
+unchanged.
+
+- **riscos-crossdev 1.3:** UnixLib 5.0.3.2 (was 5.0.3.1). Nothing in it is
+  needed by fheroes2, but it is the current release; the toolchain is now
+  static only. PThreadTicker stays 0.03.
+- **riscos-mesa devkit 12f** (was 12e): in a window, the title bar, scroll
+  bars and border icons no longer count as the game's area, so dragging
+  the window by its title bar or clicking its close or back icon no longer
+  clicks or drags inside the game; and mouse positions are no longer one
+  row out (clicks landed one pixel lower than drawn).
+- fheroes2 1.1.17, SDL2_mixer 2.6.3 and riscos-midisynth 0.4.2 are still
+  the latest releases (UnixLib 5.0.3.3 and midisynth 0.4.3 are only
+  test versions so far).
+
+## 1.1.17-riscos3test
 
 - Linked with the riscos-mesa devkit 12e, whose SDL driver now sends one
   key-down per press and repeats held keys at the desktop's auto-repeat

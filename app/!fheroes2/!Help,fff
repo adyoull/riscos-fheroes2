@@ -40,7 +40,7 @@ Requirements
   Without them the game plays silently.
 - The ARMEABISupport module and SharedUnixLibrary 1.16 or later (both
   can be installed with !PackMan).
-- PThreadTicker 0.03 (from UnixLib 5.0.3.1) is included; !Run loads it
+- PThreadTicker 0.03 (from UnixLib 5.0.3.2) is included; !Run loads it
   unless your !System already has it.
 
 

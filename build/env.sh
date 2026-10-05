@@ -2,7 +2,7 @@
 #   . build/env.sh
 #
 # Everything can be overridden from the environment before sourcing.
-#   GCCSDK_ENV  cross toolchain: riscos-crossdev 1.2 (GCC 10.2, UnixLib 5.0.3.1)
+#   GCCSDK_ENV  cross toolchain: riscos-crossdev 1.3 (GCC 10.2, UnixLib 5.0.3.2, static only)
 #   DEVKIT      unpacked riscos-mesa devkit (SDL2 with the RISC OS driver, zlib)
 #   DL          source tarballs (see build/SHA256SUMS.txt)
 #   SRC         where sources are unpacked and patched
@@ -11,15 +11,15 @@
 
 RFH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-: "${GCCSDK_ENV:=/opt/rx/riscos-crossdev-toolchain-1.2-x86_64-linux}"
-: "${DEVKIT:=/opt/dk/riscos-mesa-devkit-12e}"
+: "${GCCSDK_ENV:=/opt/rx/riscos-crossdev-toolchain-1.3-x86_64-linux}"
+: "${DEVKIT:=/opt/dk/riscos-mesa-devkit-12f}"
 : "${DL:=$RFH_ROOT/dl}"
 : "${SRC:=$RFH_ROOT/src}"
 : "${STAGE:=$RFH_ROOT/stage}"
 : "${JOBS:=$(nproc)}"
 
 FHEROES2_VERSION=1.1.17
-RISCOS_REL=riscos3test
+RISCOS_REL=riscos4test
 MIXER_VERSION=2.6.3
 MIDISYNTH_VERSION=0.4.2
 

@@ -28,7 +28,7 @@ cp "$RFH_ROOT"/app/'!fheroes2'/* "$APP/"
 $TARGET-strip -o "$STAGE/fheroes2.stripped" "$ELF"
 elf2aif -e "$STAGE/fheroes2.stripped" "$APP/fheroes2,ff8" >/dev/null
 
-# PThreadTicker module (riscos-crossdev 1.2 = UnixLib 5.0.3.1's 0.03).
+# PThreadTicker module (the toolchain's riscos/ folder: 0.03 for UnixLib 5.0.3.1 and later).
 cp "$GCCSDK_ENV/riscos/PThrTicker,ffa" "$APP/PThrTicker,ffa"
 
 # fheroes2's own data: resources, translations, maps made with its editor.
