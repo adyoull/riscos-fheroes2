@@ -1,6 +1,14 @@
 # riscos-fheroes2 changes
 
-## 1.1.17-riscos5test (unreleased)
+## 1.1.17-riscos1 (first release, tag `v1.1.17-riscos1`)
+
+The riscos5test build, released. Changes from riscos5test:
+
+- Logging is off by default (test builds wrote a log every run). To get a
+  log, remove the `|` in front of `Set fheroes2$LogOn 1` in `!Run`.
+- `!Help` says where to report problems (the GitHub issues page).
+
+## 1.1.17-riscos5test
 
 - Built with the released riscos-mesa devkit **20.3.5-12** instead of the
   interim 12f, so the build can be made from public files. Its SDL code

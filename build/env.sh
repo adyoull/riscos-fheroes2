@@ -19,7 +19,7 @@ RFH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 : "${JOBS:=$(nproc)}"
 
 FHEROES2_VERSION=1.1.17
-RISCOS_REL=riscos5test
+RISCOS_REL=riscos1
 MIXER_VERSION=2.6.3
 MIDISYNTH_VERSION=0.4.2
 

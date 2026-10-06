@@ -72,9 +72,11 @@ supported yet.
 
 Logging
 -------
-Test builds write a log to <Wimp$ScrapDir>.fheroes2log. If something
-goes wrong, please send it along with what you did. To turn it off,
-edit !Run (see the Logging section).
+Normally nothing is logged. If something goes wrong, turn the log on
+in !Run (remove the | in front of "Set fheroes2$LogOn 1" in the
+Logging section), run the game again, and send
+<Wimp$ScrapDir>.fheroes2log along with what you did. Problems can be
+reported at https://github.com/adyoull/riscos-fheroes2/issues
 
 
 Licences
