@@ -1,5 +1,17 @@
 # riscos-fheroes2 changes
 
+## 1.1.17-riscos2 (tag `v1.1.17-riscos2`)
+
+- Relinked with **UnixLib 5.0.3.3**, the latest riscos-unixlib release (was
+  5.0.3.2). Its fixes are in threads waiting inside read/write and stdio,
+  fork with threads, the services database, heap areas after a small
+  gap, /dev/dsp on DigitalRenderer, swprintf and exit codes. fheroes2 is a
+  threaded program, so the thread fixes are the ones that matter here.
+  No change to the game's own code; PThreadTicker stays 0.03.
+- riscos-crossdev 1.3 still ships 5.0.3.2, so `prepare-toolchain.sh` puts
+  the 5.0.3.3 library over it (`UNIXLIB` in `build/env.sh`). The public
+  headers of the two releases are identical.
+
 ## 1.1.17-riscos1 (first release, tag `v1.1.17-riscos1`)
 
 The riscos5test build, released. Changes from riscos5test:

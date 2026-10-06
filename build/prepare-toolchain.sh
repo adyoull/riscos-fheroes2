@@ -6,7 +6,9 @@
 #      paths, which break libtool links once the toolchain has moved;
 #   3. delete any shared libraries (static only), except libgcc_s, which
 #      libtool's own test links ask for (1.3 has none: it is static only);
-#   4. unpack the riscos-mesa devkit into $DEVKIT.
+#   4. optionally put a newer riscos-unixlib release's libunixlib.a over
+#      the toolchain's (UNIXLIB in env.sh: dl/$UNIXLIB/libunixlib.a);
+#   5. unpack the riscos-mesa devkit into $DEVKIT.
 # Needs in $DL: $(basename $GCCSDK_ENV).tar.xz and $(basename $DEVKIT).tgz
 # (both in build/SHA256SUMS.txt; see build/env.sh for the versions).
 set -e
@@ -22,6 +24,14 @@ tar xJf "$DL/$TC.tar.xz" -C "$parent"
 
 T=$GCCSDK_ENV/arm-riscos-gnueabihf
 find -L "$GCCSDK_ENV/" -name '*.la' -delete
+
+# A newer riscos-unixlib release over the toolchain's own (UNIXLIB in env.sh).
+# Only for releases whose public headers are unchanged from the toolchain's.
+if [ -n "$UNIXLIB" ]; then
+  check_sha "$DL/$UNIXLIB/libunixlib.a"
+  cp "$DL/$UNIXLIB/libunixlib.a" "$T/lib/libunixlib.a"
+  echo "UnixLib: $UNIXLIB"
+fi
 find -L "$T/lib" -maxdepth 1 -name '*.so*' ! -name 'libgcc_s.so*' -delete
 echo "toolchain ready: $($TARGET-gcc --version | head -1)"
 

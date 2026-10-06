@@ -10,7 +10,9 @@ the application's `!Help`.
 ## How it's built
 
 - **Toolchain:** [riscos-crossdev](https://github.com/adyoull/riscos-crossdev)
-  1.3 (GCCSDK GCC 10.2, UnixLib 5.0.3.2, PThreadTicker 0.03; static only).
+  1.3 (GCCSDK GCC 10.2, PThreadTicker 0.03; static only), with UnixLib
+  replaced by the [riscos-unixlib](https://github.com/adyoull/riscos-unixlib)
+  5.0.3.3 release.
 - **SDL2:** the riscos-mesa devkit 20.3.5-12 (SDL 2.26 with the RISC OS video
   and SharedSoundBuffer sound drivers), used as it is.
 - **SDL2_mixer 2.6.3**, WAV and MIDI, with a new decoder that plays MIDI

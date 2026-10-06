@@ -2,7 +2,9 @@
 #   . build/env.sh
 #
 # Everything can be overridden from the environment before sourcing.
-#   GCCSDK_ENV  cross toolchain: riscos-crossdev 1.3 (GCC 10.2, UnixLib 5.0.3.2, static only)
+#   GCCSDK_ENV  cross toolchain: riscos-crossdev 1.3 (GCC 10.2, static only)
+#   UNIXLIB     UnixLib release put over the toolchain's (dl/$UNIXLIB/libunixlib.a);
+#               empty = keep the toolchain's own (5.0.3.2 in crossdev 1.3)
 #   DEVKIT      unpacked riscos-mesa devkit (SDL2 with the RISC OS driver, zlib)
 #   DL          source tarballs (see build/SHA256SUMS.txt)
 #   SRC         where sources are unpacked and patched
@@ -19,9 +21,13 @@ RFH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 : "${JOBS:=$(nproc)}"
 
 FHEROES2_VERSION=1.1.17
-RISCOS_REL=riscos1
+RISCOS_REL=riscos2
 MIXER_VERSION=2.6.3
 MIDISYNTH_VERSION=0.4.2
+# riscos-unixlib release linked instead of crossdev 1.3's 5.0.3.2. Its public
+# headers are identical to 5.0.3.2's (checked: the include/ hunks of the two
+# releases' unixlib-riscos.diff match), so only the library is replaced.
+: "${UNIXLIB=unixlib-5.0.3.3}"
 
 TARGET=arm-riscos-gnueabihf
 BUILD=$(gcc -dumpmachine)
