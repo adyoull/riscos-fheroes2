@@ -1,6 +1,11 @@
 # riscos-fheroes2 changes
 
-## 1.1.17-riscos6test (unreleased)
+## 1.1.17-riscos3 (tag `v1.1.17-riscos3`)
+
+The riscos6test build, released, with logging off by default (remove the
+`|` in front of `Set fheroes2$LogOn 1` in `!Run` to get a log).
+
+## 1.1.17-riscos6test
 
 - **Ogg Vorbis, MP3 and FLAC music.** fheroes2 plays music tracks from a
   `MUSIC` directory when it finds them (the GOG version's tracks are Ogg
