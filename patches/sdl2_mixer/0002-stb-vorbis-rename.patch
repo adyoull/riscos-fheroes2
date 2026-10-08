@@ -1,0 +1,54 @@
+SDL_mixer: optionally rename the bundled stb_vorbis (riscos-fheroes2)
+
+SDL_mixer's stb_vorbis exports its stb_vorbis_* functions, and so does the
+copy inside riscos-midisynth (which decodes .sf3 SoundFonts), so a static
+program linking both fails with duplicate symbols. Building with
+-DSDL_MIXER_RENAME_STB_VORBIS gives SDL_mixer's copy Mix_-prefixed names.
+Without the define nothing changes.
+
+--- a/src/codecs/music_ogg_stb.c
++++ b/src/codecs/music_ogg_stb.c
+@@ -65,6 +65,43 @@
+ #define log(x) SDL_log(x)
+ #define exp(x) SDL_exp(x)
+ 
++/* riscos-fheroes2: with SDL_MIXER_RENAME_STB_VORBIS, this file's copy of
++   stb_vorbis gets Mix_-prefixed names, so a program can also link another
++   library that has its own stb_vorbis (riscos-midisynth, for .sf3 SoundFonts)
++   without duplicate symbols. */
++#ifdef SDL_MIXER_RENAME_STB_VORBIS
++#define stb_vorbis_close Mix_stb_vorbis_close
++#define stb_vorbis_decode_filename Mix_stb_vorbis_decode_filename
++#define stb_vorbis_decode_frame_pushdata Mix_stb_vorbis_decode_frame_pushdata
++#define stb_vorbis_decode_memory Mix_stb_vorbis_decode_memory
++#define stb_vorbis_flush_pushdata Mix_stb_vorbis_flush_pushdata
++#define stb_vorbis_get_comment Mix_stb_vorbis_get_comment
++#define stb_vorbis_get_error Mix_stb_vorbis_get_error
++#define stb_vorbis_get_file_offset Mix_stb_vorbis_get_file_offset
++#define stb_vorbis_get_frame_float Mix_stb_vorbis_get_frame_float
++#define stb_vorbis_get_frame_short Mix_stb_vorbis_get_frame_short
++#define stb_vorbis_get_frame_short_interleaved Mix_stb_vorbis_get_frame_short_interleaved
++#define stb_vorbis_get_info Mix_stb_vorbis_get_info
++#define stb_vorbis_get_playback_sample_offset Mix_stb_vorbis_get_playback_sample_offset
++#define stb_vorbis_get_sample_offset Mix_stb_vorbis_get_sample_offset
++#define stb_vorbis_get_samples_float Mix_stb_vorbis_get_samples_float
++#define stb_vorbis_get_samples_float_interleaved Mix_stb_vorbis_get_samples_float_interleaved
++#define stb_vorbis_get_samples_short Mix_stb_vorbis_get_samples_short
++#define stb_vorbis_get_samples_short_interleaved Mix_stb_vorbis_get_samples_short_interleaved
++#define stb_vorbis_open_file Mix_stb_vorbis_open_file
++#define stb_vorbis_open_file_section Mix_stb_vorbis_open_file_section
++#define stb_vorbis_open_filename Mix_stb_vorbis_open_filename
++#define stb_vorbis_open_memory Mix_stb_vorbis_open_memory
++#define stb_vorbis_open_pushdata Mix_stb_vorbis_open_pushdata
++#define stb_vorbis_open_rwops Mix_stb_vorbis_open_rwops
++#define stb_vorbis_open_rwops_section Mix_stb_vorbis_open_rwops_section
++#define stb_vorbis_seek Mix_stb_vorbis_seek
++#define stb_vorbis_seek_frame Mix_stb_vorbis_seek_frame
++#define stb_vorbis_seek_start Mix_stb_vorbis_seek_start
++#define stb_vorbis_stream_length_in_samples Mix_stb_vorbis_stream_length_in_samples
++#define stb_vorbis_stream_length_in_seconds Mix_stb_vorbis_stream_length_in_seconds
++#endif
++
+ #include "stb_vorbis/stb_vorbis.h"
+ 
+ typedef struct {

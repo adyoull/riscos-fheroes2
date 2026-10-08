@@ -21,7 +21,7 @@ RFH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 : "${JOBS:=$(nproc)}"
 
 FHEROES2_VERSION=1.1.17
-RISCOS_REL=riscos2
+RISCOS_REL=riscos6test
 MIXER_VERSION=2.6.3
 MIDISYNTH_VERSION=0.4.2
 # riscos-unixlib release linked instead of crossdev 1.3's 5.0.3.2. Its public

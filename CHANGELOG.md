@@ -1,5 +1,24 @@
 # riscos-fheroes2 changes
 
+## 1.1.17-riscos6test (unreleased)
+
+- **Ogg Vorbis, MP3 and FLAC music.** fheroes2 plays music tracks from a
+  `MUSIC` directory when it finds them (the GOG version's tracks are Ogg
+  Vorbis); until now this build had none of these formats. If such a
+  track was found but couldn't be played, that piece of music was simply
+  silent. SDL2_mixer now has its bundled decoders turned on: stb_vorbis
+  (Ogg), dr_mp3 and dr_flac. No other libraries are needed.
+- SDL_mixer's stb_vorbis and riscos-midisynth's own copy (for .sf3
+  SoundFonts) had the same function names, so the program couldn't link
+  both. New `patches/sdl2_mixer/0002` gives SDL_mixer's copy `Mix_`
+  names when built with `SDL_MIXER_RENAME_STB_VORBIS`. `build-deps.sh`
+  stops if a decoder is missing or the names clash.
+- Host tests: `tests/mixer-midisynth/run.sh` now also plays an Ogg, an MP3
+  and a FLAC file in the same program as midisynth (ASan/UBSan, with the
+  alignment check).
+- Test builds log by default again (`package.sh` turns logging on in
+  `!Run` for any `*test` version); releases still don't.
+
 ## 1.1.17-riscos2 (tag `v1.1.17-riscos2`)
 
 - Relinked with **UnixLib 5.0.3.3**, the latest riscos-unixlib release (was

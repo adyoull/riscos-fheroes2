@@ -23,6 +23,11 @@ rm -rf "$APP"
 mkdir -p "$APP/docs/licences" "$APP/docs/patches" "$APP/files/data" "$APP/files/lang" \
          "$APP/files/soundfonts" "$APP/maps"
 cp "$RFH_ROOT"/app/'!fheroes2'/* "$APP/"
+# Test builds log by default; releases don't (remove the | in !Run to log).
+case $VERSION in *test)
+  sed -i 's/^| Set fheroes2\$LogOn 1$/Set fheroes2$LogOn 1/' "$APP/!Run,feb"
+  grep -q '^Set fheroes2\$LogOn 1$' "$APP/!Run,feb" || die "couldn't turn logging on in !Run" ;;
+esac
 
 # Program: ELF -> AIF (Absolute), stripped. -e: EABI (arm-riscos-gnueabihf) ELF.
 $TARGET-strip -o "$STAGE/fheroes2.stripped" "$ELF"
@@ -48,6 +53,13 @@ cp "$RFH_ROOT/CHANGELOG.md" "$APP/docs/RISCOS-Changes,fff"
 lic=$APP/docs/licences
 cp "$DEVKIT/LICENCES.txt" "$lic/riscos-mesa-devkit,fff"          # SDL2, zlib, UnixLib
 cp "$SRC/SDL2_mixer-$MIXER_VERSION/LICENSE.txt" "$lic/SDL2_mixer,fff"
+# SDL_mixer's bundled music decoders (Ogg Vorbis, MP3, FLAC): their notices.
+MX=$SRC/SDL2_mixer-$MIXER_VERSION/src/codecs
+{ echo "stb_vorbis (Ogg Vorbis), Sean Barrett, bundled in SDL2_mixer:"; echo
+  sed -n '/^This software is available under 2 licenses/,$p' "$MX/stb_vorbis/stb_vorbis.h"
+  echo; echo "dr_mp3 and dr_flac (MP3, FLAC), David Reid, bundled in SDL2_mixer:"; echo
+  awk '/^This software is available as a choice of the following licenses/{p=1} p' "$MX/dr_libs/dr_flac.h"
+} > "$lic/SDL2_mixer-decoders,fff"
 MS=$SRC/riscos-midisynth-$MIDISYNTH_VERSION
 cp "$MS/LICENSE" "$lic/midisynth,fff"
 cp "$MS/third_party/TinySoundFont/LICENSE" "$lic/TinySoundFont,fff" 2>/dev/null \

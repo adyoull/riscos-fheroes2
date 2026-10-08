@@ -15,9 +15,11 @@ the application's `!Help`.
   5.0.3.3 release.
 - **SDL2:** the riscos-mesa devkit 20.3.5-12 (SDL 2.26 with the RISC OS video
   and SharedSoundBuffer sound drivers), used as it is.
-- **SDL2_mixer 2.6.3**, WAV and MIDI, with a new decoder that plays MIDI
-  through [riscos-midisynth](https://github.com/adyoull/riscos-midisynth)
-  0.4.2 (`patches/sdl2_mixer`).
+- **SDL2_mixer 2.6.3**: WAV; Ogg Vorbis, MP3 and FLAC with its bundled
+  decoders (stb_vorbis, dr_mp3, dr_flac); and MIDI through a new decoder
+  that plays it with [riscos-midisynth](https://github.com/adyoull/riscos-midisynth)
+  0.4.2 (`patches/sdl2_mixer`; 0002 renames SDL_mixer's stb_vorbis so it
+  doesn't clash with midisynth's).
 - **fheroes2 1.1.17** with the patches in `patches/fheroes2` (see `series`):
 
   | Patch | What |

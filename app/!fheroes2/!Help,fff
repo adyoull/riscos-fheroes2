@@ -66,8 +66,12 @@ Music
 The original game's music is MIDI. RISC OS has no MIDI synthesiser, so
 the game plays it with its own one (riscos-midisynth, TinySoundFont)
 and the SoundFont in files.soundfonts (TimGM6mb). You can put another
-.sf2 file there instead. The GOG version's OGG music tracks aren't
-supported yet.
+.sf2 file there instead.
+
+The GOG version has the music as Ogg Vorbis tracks in its MUSIC
+directory. Copy MUSIC next to DATA and MAPS and the game plays those
+instead of the MIDI music (choose the music type in the game's audio
+settings). MP3 and FLAC tracks with the same names work too.
 
 
 Logging

@@ -35,24 +35,33 @@ step_midisynth() {
     GCCSDK_INSTALL_ENV="$STAGE" build/riscos/libmidisynth.a install
 }
 
-# SDL2_mixer: WAV (the game's sound effects) and MIDI through midisynth
-# (patches/sdl2_mixer). Everything else off. Ogg Vorbis (the GOG version's
-# music tracks) is off for now: SDL_mixer's stb_vorbis and the copy inside
-# midisynth (for .sf3 SoundFonts) both export the stb_vorbis_* symbols.
+# SDL2_mixer: WAV (the game's sound effects), MIDI through midisynth
+# (patches/sdl2_mixer/0001), and the music formats fheroes2 looks for in a
+# MUSIC directory (the GOG version's tracks): Ogg Vorbis (stb_vorbis), MP3
+# (dr_mp3) and FLAC (dr_flac), all bundled in SDL_mixer, no other libraries.
+# midisynth has its own stb_vorbis (for .sf3 SoundFonts), so SDL_mixer's is
+# renamed (patches/sdl2_mixer/0002, SDL_MIXER_RENAME_STB_VORBIS).
 step_mixer() {
   unpack SDL2_mixer-$MIXER_VERSION.tar.gz SDL2_mixer-$MIXER_VERSION sdl2_mixer
   ( cd "$SRC/SDL2_mixer-$MIXER_VERSION"; cross_env
-    export CFLAGS="$CFLAGS -DMUSIC_MID -DMUSIC_MID_MIDISYNTH"
-    ro_configure --disable-sdltest --enable-music-wave --disable-music-ogg \
-      --disable-music-cmd --disable-music-mod --disable-music-midi \
-      --disable-music-flac --disable-music-mp3 --disable-music-opus
+    export CFLAGS="$CFLAGS -DMUSIC_MID -DMUSIC_MID_MIDISYNTH -DSDL_MIXER_RENAME_STB_VORBIS"
+    ro_configure --disable-sdltest --enable-music-wave \
+      --enable-music-ogg --enable-music-ogg-stb --disable-music-ogg-vorbis --disable-music-ogg-tremor \
+      --enable-music-mp3 --enable-music-mp3-drmp3 --disable-music-mp3-mpg123 \
+      --enable-music-flac --enable-music-flac-drflac --disable-music-flac-libflac \
+      --disable-music-cmd --disable-music-mod --disable-music-midi --disable-music-opus
     # Only the library and headers: the test players (playwave, playmus)
     # would need -lmidisynth after the library.
     make -j"$JOBS" build/libSDL2_mixer.la && make install-hdrs install-lib )
   # The static library needs midisynth after it.
   sed -i 's/^Libs: \(.*\)-lSDL2_mixer/Libs: \1-lSDL2_mixer -lmidisynth/' "$STAGE/lib/pkgconfig/SDL2_mixer.pc"
-  "$TARGET-nm" "$STAGE/lib/libSDL2_mixer.a" | grep -q 'Mix_MusicInterface_MIDISYNTH' \
-    || die "SDL2_mixer was built without the midisynth decoder"
+  for i in MIDISYNTH OGG DRMP3 DRFLAC; do
+    "$TARGET-nm" "$STAGE/lib/libSDL2_mixer.a" | grep -q " Mix_MusicInterface_$i\$" \
+      || die "SDL2_mixer was built without the $i decoder"
+  done
+  if "$TARGET-nm" "$STAGE/lib/libSDL2_mixer.a" | grep -q ' T stb_vorbis_'; then
+    die "SDL2_mixer's stb_vorbis wasn't renamed (it would clash with midisynth's)"
+  fi
 }
 
 steps=${*:-midisynth mixer}
