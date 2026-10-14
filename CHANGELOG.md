@@ -1,5 +1,11 @@
 # riscos-fheroes2 changes
 
+## 1.1.17-riscos4 (tag `v1.1.17-riscos4`)
+
+The riscos7test build, released, with logging off by default (remove the
+`|` in front of `Set fheroes2$LogOn 1` in `!Run` to get a log, which
+also has the drawing times).
+
 ## 1.1.17-riscos7test
 
 Faster drawing, mostly for the Pi: the game's 8-bit screen is converted
