@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <adyoull@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 09:55:25 +0100
+Subject: [PATCH] RISC OS: fheroes2$AudioRate to choose the sound output rate
+
+The output rate stays 44100 Hz. fheroes2$AudioRate 22050 (or 11025,
+48000) changes it: at 22050 Hz the MIDI synthesiser and the mixing do
+half the work (the game's sound effects are 22050 Hz anyway; the music
+loses its top octave), as fheroes2 does on the PS Vita. The buffer
+keeps about the same length in time.
+---
+ src/engine/audio.cpp | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/src/engine/audio.cpp b/src/engine/audio.cpp
+index be9cd7c..9018128 100644
+--- a/src/engine/audio.cpp
++++ b/src/engine/audio.cpp
+@@ -24,6 +24,7 @@
+ #include "audio.h"
+ 
+ #include <algorithm>
++#include <cstdlib>
+ #include <atomic>
+ #include <cassert>
+ #include <cmath>
+@@ -656,7 +657,21 @@ void Audio::Init()
+         }
+     }
+ 
++#if defined( __riscos__ )
++    // RISC OS: fheroes2$AudioRate 22050 halves the work of the MIDI synthesiser and of the
++    // mixing (the game's sound effects are 22050 Hz anyway; music loses its top octave).
++    AudioSpec audioSpec;
++    if ( const char * rate = getenv( "fheroes2$AudioRate" ); rate != nullptr ) {
++        const int frequency = atoi( rate );
++        if ( frequency == 11025 || frequency == 22050 || frequency == 44100 || frequency == 48000 ) {
++            // Keep the buffer about the same length in time.
++            audioSpec.chunkSize = std::max( 1024, audioSpec.chunkSize * frequency / 44100 / 1024 * 1024 );
++            audioSpec.frequency = frequency;
++        }
++    }
++#else
+     const AudioSpec audioSpec;
++#endif
+ 
+     if ( Mix_OpenAudio( audioSpec.frequency, audioSpec.format, audioSpec.channels, audioSpec.chunkSize ) != 0 ) {
+         ERROR_LOG( "Failed to initialize an audio device. The error: " << Mix_GetError() )

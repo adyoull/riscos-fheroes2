@@ -47,6 +47,14 @@ Also worth running after changing code:
   host build with `-fsanitize=alignment` through a game (see below).
 - `tests/mixer-midisynth/run.sh`: the SDL_mixer MIDI decoder on the host
   with ASan/UBSan.
+- `tests/present/run.sh`: the present path (patch 0006) on the host with
+  ASan/UBSan: random changes, colour cycling, new palettes and sizes,
+  scaled and unscaled; the surface and the plotted rectangles must always
+  equal a full conversion.
+- `tests/present/bench.cpp` replays frames recorded from a game through
+  the old and the new present path and compares them (see the comment at
+  its top). To record, build the host copy below with a trace writer in
+  `_riscosRender` (`FH2_TRACE`); it isn't part of the patches.
 
 ## Host test of the RISC OS drawing code
 

@@ -28,12 +28,14 @@ fi
 SDL_FLAGS=$(pkg-config --cflags SDL2_mixer sdl2)
 SDL_LIBS=$(pkg-config --libs SDL2_mixer sdl2)
 
+# -O3: upstream's own optimisation level (its Makefile adds -O3, which the
+#   -O2 in RO_CFLAGS used to override).
 # -ffile-prefix-map: no build paths in the binary (__FILE__ in asserts).
 # -DNDEBUG: release build, as upstream's CMake release configuration.
 # The flags go in the environment, not on the make command line, because
 # the Makefiles append their own (-std=c++17, warnings) to them.
 CFLAGS="$RO_CFLAGS" \
-CXXFLAGS="$RO_CFLAGS -ffile-prefix-map=$TREE=fheroes2-$FHEROES2_VERSION" \
+CXXFLAGS="$RO_CFLAGS -O3 -ffile-prefix-map=$TREE=fheroes2-$FHEROES2_VERSION" \
 CPPFLAGS="-DNDEBUG" \
 LDFLAGS="-static -L$STAGE/lib" \
 PTHREAD_FLAG= \

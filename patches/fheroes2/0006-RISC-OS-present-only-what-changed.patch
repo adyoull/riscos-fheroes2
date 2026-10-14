@@ -1,0 +1,822 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <adyoull@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 09:34:31 +0100
+Subject: [PATCH] RISC OS: present only what changed
+
+Converting the 8-bit game screen into the window's 32-bit surface, and
+plotting it, was the biggest cost per frame on RISC OS (more than the
+game's own drawing), and the palette cycling (water, lava: 17 colours
+every 220 ms) made every cycle convert and plot the whole screen.
+
+The new present path (riscos_present.h) keeps a copy of the last
+presented game screen. In the area the game reports as changed, only
+pixels that differ from the copy are converted, and only the 64-pixel
+cells of 16-row bands that changed are plotted (up to 48 rectangles,
+otherwise one around them all). When the palette changes, only pixels
+using the changed colours (and any other differences) are redrawn,
+instead of the whole frame; Display::_renderFrame no longer forces a
+full frame for it on RISC OS. Scaled rows are converted once into a
+buffer and copied, never read back from the surface (in full screen it
+is the screen memory). The black borders are filled only when the size
+changes. In full screen everything is redrawn every 5 seconds, in case
+another program drew over the screen.
+
+With a log (fheroes2$Log), the time spent converting and plotting, and
+the pixels and rectangles per frame, are logged every 10 seconds.
+---
+ src/engine/riscos_present.h | 530 ++++++++++++++++++++++++++++++++++++
+ src/engine/screen.cpp       | 170 +++++++-----
+ 2 files changed, 629 insertions(+), 71 deletions(-)
+ create mode 100644 src/engine/riscos_present.h
+
+diff --git a/src/engine/riscos_present.h b/src/engine/riscos_present.h
+new file mode 100644
+index 0000000..7e0641d
+--- /dev/null
++++ b/src/engine/riscos_present.h
+@@ -0,0 +1,530 @@
++/***************************************************************************
++ *   fheroes2: https://github.com/ihhub/fheroes2                           *
++ *   Copyright (C) 2026                                                    *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program; if not, write to the                         *
++ *   Free Software Foundation, Inc.,                                       *
++ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
++ ***************************************************************************/
++
++// RISC OS present path (used by screen.cpp on RISC OS, and by a host test).
++//
++// The 8-bit game screen is converted through the palette into a 32-bit surface (the
++// window's sprite, or the screen memory itself in full screen), scaled with nearest
++// pixels when the surface is bigger. RISC OS has no accelerated SDL renderer, so this
++// conversion and the plot that follows it are a large part of the time per frame.
++//
++// To keep that small:
++// - A copy of the last presented game screen is kept. Only pixels that differ from it
++//   are converted, and only the 64-pixel cells of 16-row bands that changed are plotted.
++//   The game often marks big areas as changed when only a few animated objects moved.
++// - The palette cycling (water, lava; 17 colours every 220 ms) doesn't redraw the whole
++//   screen: only pixels using the colours that changed are converted and plotted.
++// - Scaled rows are converted once into a buffer and copied, never read back from the
++//   surface (screen memory is slow to read).
++// - The black borders are filled only when the size changes.
++//
++// The surface must be 32 bits per pixel with a pitch that is a multiple of 4.
++
++#ifndef H2RISCOS_PRESENT_H
++#define H2RISCOS_PRESENT_H
++
++#include <algorithm>
++#include <cstdint>
++#include <cstring>
++#include <vector>
++
++namespace fheroes2::riscos
++{
++    struct PresentRect
++    {
++        int32_t x;
++        int32_t y;
++        int32_t w;
++        int32_t h;
++    };
++
++    struct PresentStats
++    {
++        uint64_t frames = 0;
++        uint64_t fullFrames = 0;
++        uint64_t paletteFrames = 0; // frames that applied a palette change
++        uint64_t pixelsScanned = 0; // game pixels compared
++        uint64_t pixelsConverted = 0; // surface pixels written
++        uint64_t pixelsPlotted = 0; // surface pixels in the rectangles to plot
++        uint64_t rects = 0;
++    };
++
++    class Presenter
++    {
++    public:
++        static constexpr int32_t cellWidth = 64; // game pixels
++        static constexpr int32_t bandHeight = 16; // game rows
++        static constexpr size_t maxRects = 48;
++        static constexpr int maxPaletteChanges = 64; // more than this: convert everything
++
++        // Game screen size, where the picture goes in the surface, and the surface's size.
++        void setGeometry( const int32_t gameWidth, const int32_t gameHeight, const PresentRect & dest, const int32_t surfaceWidth, const int32_t surfaceHeight )
++        {
++            _gw = std::max( gameWidth, 0 );
++            _gh = std::max( gameHeight, 0 );
++            _dest = dest;
++            _sw = surfaceWidth;
++            _sh = surfaceHeight;
++            _scaled = !( _dest.w == _gw && _dest.h == _gh );
++
++            _xMap.resize( static_cast<size_t>( std::max( _dest.w, 0 ) ) );
++            for ( int32_t x = 0; x < _dest.w; ++x ) {
++                _xMap[x] = static_cast<int32_t>( static_cast<int64_t>( x ) * _gw / _dest.w );
++            }
++            _rowBuffer.resize( static_cast<size_t>( std::max( _dest.w, 0 ) ) );
++
++            _cellsPerRow = ( _gw + cellWidth - 1 ) / cellWidth;
++            _bands = ( _gh + bandHeight - 1 ) / bandHeight;
++            _dirty.assign( static_cast<size_t>( _cellsPerRow ) * static_cast<size_t>( _bands ), 0 );
++
++            _shadow.assign( static_cast<size_t>( _gw ) * static_cast<size_t>( _gh ), 0 );
++            _bordersDirty = true;
++            invalidate();
++        }
++
++        // The next present converts and plots everything (with 'borders', the black
++        // borders too: something else may have drawn over the surface).
++        void invalidate( const bool borders = false )
++        {
++            _full = true;
++            if ( borders ) {
++                _bordersDirty = true;
++            }
++        }
++
++        // New palette (256 surface pixel values). Only colours that changed get redrawn.
++        void setPalette( const uint32_t * palette )
++        {
++            if ( !_hasPalette ) {
++                std::copy( palette, palette + 256, _palette );
++                _hasPalette = true;
++                invalidate();
++                return;
++            }
++
++            int changes = 0;
++            for ( int i = 0; i < 256; ++i ) {
++                if ( _palette[i] != palette[i] ) {
++                    _paletteDelta[i] = 1;
++                    ++changes;
++                    _deltaFirst = std::min( _deltaFirst, i );
++                    _deltaLast = std::max( _deltaLast, i );
++                }
++            }
++            if ( changes > 0 ) {
++                _deltaLow = static_cast<uint32_t>( _deltaFirst );
++                _deltaRange = _deltaLast - _deltaFirst + 1;
++            }
++            std::copy( palette, palette + 256, _palette );
++
++            if ( changes == 0 ) {
++                return;
++            }
++            _paletteChanged = true;
++            _paletteChanges += changes;
++            if ( _paletteChanges > maxPaletteChanges ) {
++                invalidate();
++            }
++        }
++
++        bool needsFullFrame() const
++        {
++            return _full;
++        }
++
++        // Converts what changed in the game screen 'image' (gw x gh bytes) into the surface
++        // and gives the rectangles of the surface that must be plotted. 'roi' (game
++        // coordinates) is the area the game says has changed: nothing outside it is
++        // compared, except for pixels whose colour the palette changed.
++        void present( const uint8_t * image, int32_t roiX, int32_t roiY, int32_t roiW, int32_t roiH, uint32_t * pixels, const int32_t pitchBytes, const uint32_t black,
++                      std::vector<PresentRect> & rects, PresentStats & stats )
++        {
++            rects.clear();
++            if ( _gw <= 0 || _gh <= 0 || _dest.w <= 0 || _dest.h <= 0 || !_hasPalette ) {
++                return;
++            }
++
++            ++stats.frames;
++            const int32_t pitch = pitchBytes / 4;
++
++            if ( _full ) {
++                ++stats.fullFrames;
++                _presentAll( image, pixels, pitch, black, rects, stats );
++                _full = false;
++                _clearPaletteDelta();
++                return;
++            }
++
++            // Area to compare: the game's area, or everything when colours changed.
++            int32_t x0;
++            int32_t y0;
++            int32_t x1;
++            int32_t y1;
++            if ( _paletteChanged ) {
++                ++stats.paletteFrames;
++                x0 = 0;
++                y0 = 0;
++                x1 = _gw;
++                y1 = _gh;
++            }
++            else {
++                x0 = std::clamp( roiX, 0, _gw );
++                y0 = std::clamp( roiY, 0, _gh );
++                x1 = std::clamp( roiX + std::max( roiW, 0 ), x0, _gw );
++                y1 = std::clamp( roiY + std::max( roiH, 0 ), y0, _gh );
++            }
++
++            if ( x0 < x1 && y0 < y1 ) {
++                stats.pixelsScanned += static_cast<uint64_t>( x1 - x0 ) * static_cast<uint64_t>( y1 - y0 );
++                for ( int32_t y = y0; y < y1; ++y ) {
++                    _presentRow( image, y, x0, x1, pixels, pitch, stats );
++                }
++                _collectRects( y0, y1, rects, stats );
++            }
++
++            _clearPaletteDelta();
++        }
++
++    private:
++        int32_t _gw{ 0 };
++        int32_t _gh{ 0 };
++        int32_t _sw{ 0 };
++        int32_t _sh{ 0 };
++        PresentRect _dest{ 0, 0, 0, 0 };
++        bool _scaled{ false };
++        bool _full{ true };
++        bool _bordersDirty{ true };
++        bool _hasPalette{ false };
++        bool _paletteChanged{ false };
++        int _paletteChanges{ 0 };
++        uint32_t _palette[256]{};
++        uint8_t _paletteDelta[256]{};
++        int _deltaFirst{ 256 }; // the changed colours are in [_deltaFirst, _deltaLast]
++        int _deltaLast{ -1 };
++        uint32_t _deltaLow{ 0 };
++        int _deltaRange{ 256 };
++        std::vector<int32_t> _xMap;
++        std::vector<uint32_t> _rowBuffer;
++        std::vector<uint8_t> _shadow;
++        std::vector<uint8_t> _dirty; // cells per band
++        int32_t _cellsPerRow{ 0 };
++        int32_t _bands{ 0 };
++
++        void _clearPaletteDelta()
++        {
++            if ( _paletteChanged || _paletteChanges > 0 ) {
++                std::memset( _paletteDelta, 0, sizeof( _paletteDelta ) );
++            }
++            _paletteChanged = false;
++            _paletteChanges = 0;
++            _deltaFirst = 256;
++            _deltaLast = -1;
++        }
++
++        // First surface column (or row) whose game column (row) is at or after 'src'.
++        static int32_t _scaleUp( const int32_t src, const int32_t destSize, const int32_t gameSize )
++        {
++            return static_cast<int32_t>( ( static_cast<int64_t>( src ) * destSize + gameSize - 1 ) / gameSize );
++        }
++
++        uint32_t * _row( uint32_t * pixels, const int32_t pitch, const int32_t destRow ) const
++        {
++            return pixels + static_cast<ptrdiff_t>( _dest.y + destRow ) * pitch + _dest.x;
++        }
++
++        static void _convert( const uint8_t * in, uint32_t * out, int32_t count, const uint32_t * palette )
++        {
++            while ( count >= 4 ) {
++                const uint32_t a = palette[in[0]];
++                const uint32_t b = palette[in[1]];
++                const uint32_t c = palette[in[2]];
++                const uint32_t d = palette[in[3]];
++                out[0] = a;
++                out[1] = b;
++                out[2] = c;
++                out[3] = d;
++                in += 4;
++                out += 4;
++                count -= 4;
++            }
++            while ( count > 0 ) {
++                *out++ = palette[*in++];
++                --count;
++            }
++        }
++
++        // Game pixels [x0, x1) of row y go to the surface.
++        void _drawSpan( const uint8_t * image, const int32_t y, const int32_t x0, const int32_t x1, uint32_t * pixels, const int32_t pitch, PresentStats & stats )
++        {
++            const uint8_t * in = image + static_cast<ptrdiff_t>( y ) * _gw;
++
++            if ( !_scaled ) {
++                _convert( in + x0, _row( pixels, pitch, y ) + x0, x1 - x0, _palette );
++                stats.pixelsConverted += static_cast<uint64_t>( x1 - x0 );
++                return;
++            }
++
++            const int32_t dx0 = _scaleUp( x0, _dest.w, _gw );
++            const int32_t dx1 = _scaleUp( x1, _dest.w, _gw );
++            const int32_t dy0 = _scaleUp( y, _dest.h, _gh );
++            const int32_t dy1 = _scaleUp( y + 1, _dest.h, _gh );
++            if ( dx0 >= dx1 || dy0 >= dy1 ) {
++                return;
++            }
++
++            // Convert once into the buffer, then copy to each surface row (the surface may
++            // be screen memory, which is slow to read back).
++            uint32_t * buffer = _rowBuffer.data();
++            const int32_t * xMap = _xMap.data();
++            for ( int32_t dx = dx0; dx < dx1; ++dx ) {
++                buffer[dx - dx0] = _palette[in[xMap[dx]]];
++            }
++
++            const size_t bytes = static_cast<size_t>( dx1 - dx0 ) * 4;
++            for ( int32_t dy = dy0; dy < dy1; ++dy ) {
++                std::memcpy( _row( pixels, pitch, dy ) + dx0, buffer, bytes );
++            }
++            stats.pixelsConverted += static_cast<uint64_t>( dx1 - dx0 ) * static_cast<uint64_t>( dy1 - dy0 );
++        }
++
++        // Could cell [start, end) of a row have a pixel that changed, or uses a colour that
++        // changed? Exact "no"; a "yes" is checked pixel by pixel.
++        bool _cellMayHavePaletteChange( const uint8_t * in, const uint8_t * shadow, const int32_t start, const int32_t end ) const
++        {
++            int32_t x = start;
++            if ( _deltaRange <= 128 && ( reinterpret_cast<uintptr_t>( in + x ) & 3 ) == 0 && ( reinterpret_cast<uintptr_t>( shadow + x ) & 3 ) == 0 ) {
++                // Four pixels at a time: the changed colours are all in [_deltaLow, _deltaLow +
++                // _deltaRange), so test whether any byte, minus _deltaLow, is below _deltaRange.
++                const uint32_t high = 0x80808080u;
++                const uint32_t low = 0x01010101u * _deltaLow;
++                const uint32_t range = 0x01010101u * static_cast<uint32_t>( _deltaRange );
++                for ( ; x + 4 <= end; x += 4 ) {
++                    uint32_t a;
++                    uint32_t b;
++                    std::memcpy( &a, __builtin_assume_aligned( in + x, 4 ), 4 );
++                    std::memcpy( &b, __builtin_assume_aligned( shadow + x, 4 ), 4 );
++                    if ( a != b ) {
++                        return true;
++                    }
++                    // Byte-wise a - low (no borrow between bytes), then "any byte < range".
++                    const uint32_t t = ( ( a | high ) - ( low & ~high ) ) ^ ( ( a ^ ~low ) & high );
++                    if ( ( ( t - range ) & ~t & high ) != 0 ) {
++                        return true;
++                    }
++                }
++            }
++            uint32_t any = 0;
++            for ( ; x < end; ++x ) {
++                any |= static_cast<uint32_t>( _paletteDelta[in[x]] ) | static_cast<uint32_t>( in[x] ^ shadow[x] );
++            }
++            return any != 0;
++        }
++
++        // Is game pixel 'value' (shadow 'old') to be redrawn?
++        bool _changed( const uint8_t value, const uint8_t old ) const
++        {
++            return value != old || _paletteDelta[value] != 0;
++        }
++
++        void _presentRow( const uint8_t * image, const int32_t y, const int32_t x0, const int32_t x1, uint32_t * pixels, const int32_t pitch, PresentStats & stats )
++        {
++            const uint8_t * in = image + static_cast<ptrdiff_t>( y ) * _gw;
++            uint8_t * shadow = _shadow.data() + static_cast<ptrdiff_t>( y ) * _gw;
++            uint8_t * dirty = _dirty.data() + static_cast<ptrdiff_t>( y / bandHeight ) * _cellsPerRow;
++            const bool paletteChanged = _paletteChanged;
++
++            // Cell by cell, so that separate changes on one row are drawn and plotted separately.
++            for ( int32_t cellStart = ( x0 / cellWidth ) * cellWidth; cellStart < x1; cellStart += cellWidth ) {
++                const int32_t start = std::max( cellStart, x0 );
++                const int32_t end = std::min( cellStart + cellWidth, x1 );
++
++                int32_t first = start;
++                if ( paletteChanged ) {
++                    // Whole screen, every 220 ms: first a quick check of the cell.
++                    if ( !_cellMayHavePaletteChange( in, shadow, start, end ) ) {
++                        continue;
++                    }
++                    while ( first < end && !_changed( in[first], shadow[first] ) ) {
++                        ++first;
++                    }
++                }
++                else {
++                    // Four bytes at a time where both are word aligned (they are when the
++                    // game width is a multiple of 4).
++                    while ( first < end && ( reinterpret_cast<uintptr_t>( in + first ) & 3 ) != 0 && in[first] == shadow[first] ) {
++                        ++first;
++                    }
++                    if ( first < end && in[first] == shadow[first] && ( reinterpret_cast<uintptr_t>( shadow + first ) & 3 ) == 0 ) {
++                        while ( first + 4 <= end ) {
++                            uint32_t a;
++                            uint32_t b;
++                            std::memcpy( &a, __builtin_assume_aligned( in + first, 4 ), 4 );
++                            std::memcpy( &b, __builtin_assume_aligned( shadow + first, 4 ), 4 );
++                            if ( a != b ) {
++                                break;
++                            }
++                            first += 4;
++                        }
++                    }
++                    while ( first < end && in[first] == shadow[first] ) {
++                        ++first;
++                    }
++                }
++
++                if ( first == end ) {
++                    continue;
++                }
++
++                int32_t last = end - 1;
++                while ( last > first && !_changed( in[last], shadow[last] ) ) {
++                    --last;
++                }
++
++                _drawSpan( image, y, first, last + 1, pixels, pitch, stats );
++                std::memcpy( shadow + first, in + first, static_cast<size_t>( last + 1 - first ) );
++                dirty[cellStart / cellWidth] = 1;
++            }
++        }
++
++        // Surface rectangle for game rectangle (x, y, w, h).
++        PresentRect _toSurface( const int32_t x, const int32_t y, const int32_t w, const int32_t h ) const
++        {
++            const int32_t dx0 = _scaleUp( x, _dest.w, _gw );
++            const int32_t dx1 = _scaleUp( x + w, _dest.w, _gw );
++            const int32_t dy0 = _scaleUp( y, _dest.h, _gh );
++            const int32_t dy1 = _scaleUp( y + h, _dest.h, _gh );
++            return { _dest.x + dx0, _dest.y + dy0, dx1 - dx0, dy1 - dy0 };
++        }
++
++        void _collectRects( const int32_t y0, const int32_t y1, std::vector<PresentRect> & rects, PresentStats & stats )
++        {
++            const int32_t firstBand = y0 / bandHeight;
++            const int32_t lastBand = ( y1 - 1 ) / bandHeight;
++
++            // Runs of dirty cells in each band, joined with the same run in the band above.
++            std::vector<PresentRect> & game = _gameRects;
++            game.clear();
++            _open.clear();
++            for ( int32_t band = firstBand; band <= lastBand; ++band ) {
++                uint8_t * dirty = _dirty.data() + static_cast<ptrdiff_t>( band ) * _cellsPerRow;
++                const int32_t by = band * bandHeight;
++                const int32_t bh = std::min( bandHeight, _gh - by );
++                _nextOpen.clear();
++
++                for ( int32_t cell = 0; cell < _cellsPerRow; ) {
++                    if ( dirty[cell] == 0 ) {
++                        ++cell;
++                        continue;
++                    }
++                    const int32_t runStart = cell;
++                    while ( cell < _cellsPerRow && dirty[cell] != 0 ) {
++                        dirty[cell] = 0;
++                        ++cell;
++                    }
++                    const int32_t x = runStart * cellWidth;
++                    const int32_t w = std::min( cell * cellWidth, _gw ) - x;
++
++                    size_t index = game.size();
++                    for ( const size_t i : _open ) {
++                        if ( game[i].x == x && game[i].w == w ) {
++                            index = i;
++                            break;
++                        }
++                    }
++                    if ( index < game.size() ) {
++                        game[index].h += bh;
++                    }
++                    else {
++                        game.push_back( { x, by, w, bh } );
++                    }
++                    _nextOpen.push_back( index );
++                }
++
++                _open.swap( _nextOpen );
++            }
++
++            if ( game.empty() ) {
++                return;
++            }
++
++            if ( game.size() > maxRects ) {
++                // Too many to plot one by one: one rectangle around them all.
++                int32_t left = game[0].x;
++                int32_t top = game[0].y;
++                int32_t right = game[0].x + game[0].w;
++                int32_t bottom = game[0].y + game[0].h;
++                for ( const PresentRect & r : game ) {
++                    left = std::min( left, r.x );
++                    top = std::min( top, r.y );
++                    right = std::max( right, r.x + r.w );
++                    bottom = std::max( bottom, r.y + r.h );
++                }
++                game.clear();
++                game.push_back( { left, top, right - left, bottom - top } );
++            }
++
++            for ( const PresentRect & r : game ) {
++                const PresentRect s = _toSurface( r.x, r.y, r.w, r.h );
++                if ( s.w > 0 && s.h > 0 ) {
++                    rects.push_back( s );
++                    stats.pixelsPlotted += static_cast<uint64_t>( s.w ) * static_cast<uint64_t>( s.h );
++                }
++            }
++            stats.rects += rects.size();
++        }
++
++        std::vector<PresentRect> _gameRects;
++        std::vector<size_t> _open; // rectangles that reach the bottom of the last band
++        std::vector<size_t> _nextOpen;
++
++        void _fill( uint32_t * pixels, const int32_t pitch, const int32_t x, const int32_t y, const int32_t w, const int32_t h, const uint32_t value ) const
++        {
++            for ( int32_t row = y; row < y + h; ++row ) {
++                std::fill_n( pixels + static_cast<ptrdiff_t>( row ) * pitch + x, w, value );
++            }
++        }
++
++        void _presentAll( const uint8_t * image, uint32_t * pixels, const int32_t pitch, const uint32_t black, std::vector<PresentRect> & rects, PresentStats & stats )
++        {
++            const bool borders = _bordersDirty && ( _dest.x > 0 || _dest.y > 0 || _dest.x + _dest.w < _sw || _dest.y + _dest.h < _sh );
++            if ( borders ) {
++                // Only the strips around the picture.
++                _fill( pixels, pitch, 0, 0, _sw, _dest.y, black );
++                _fill( pixels, pitch, 0, _dest.y + _dest.h, _sw, _sh - _dest.y - _dest.h, black );
++                _fill( pixels, pitch, 0, _dest.y, _dest.x, _dest.h, black );
++                _fill( pixels, pitch, _dest.x + _dest.w, _dest.y, _sw - _dest.x - _dest.w, _dest.h, black );
++            }
++            _bordersDirty = false;
++
++            for ( int32_t y = 0; y < _gh; ++y ) {
++                _drawSpan( image, y, 0, _gw, pixels, pitch, stats );
++            }
++            std::memcpy( _shadow.data(), image, _shadow.size() );
++            std::fill( _dirty.begin(), _dirty.end(), static_cast<uint8_t>( 0 ) );
++
++            const PresentRect all = borders ? PresentRect{ 0, 0, _sw, _sh } : _dest;
++            rects.push_back( all );
++            stats.rects += 1;
++            stats.pixelsPlotted += static_cast<uint64_t>( all.w ) * static_cast<uint64_t>( all.h );
++        }
++    };
++}
++
++#endif
+diff --git a/src/engine/screen.cpp b/src/engine/screen.cpp
+index 023f0bc..4ab5189 100644
+--- a/src/engine/screen.cpp
++++ b/src/engine/screen.cpp
+@@ -59,6 +59,14 @@
+ #include <vita2d.h>
+ #endif
+ 
++#if defined( __riscos__ )
++#include <cstdlib>
++
++#include <SDL_timer.h>
++
++#include "riscos_present.h"
++#endif
++
+ #include "image_palette.h"
+ #include "logging.h"
+ #include "math_tools.h"
+@@ -1388,7 +1396,8 @@ namespace
+ 
+             _riscosColorIds = colorIds;
+             generatePalette( colorIds, _riscosSurface );
+-            _riscosNeedFullFrame = true;
++            // Only the colours that changed are redrawn (the palette cycling changes 17).
++            _riscosPresenter.setPalette( _palette32Bit.data() );
+             return;
+ #endif
+             if ( _surface == nullptr || colorIds.size() != 256 )
+@@ -1472,11 +1481,20 @@ namespace
+         fheroes2::Size _riscosGameSize;
+         fheroes2::Size _riscosSurfaceSize;
+         SDL_Rect _riscosDest{ 0, 0, 0, 0 };
+-        std::vector<int32_t> _riscosXMap;
+-        std::vector<int32_t> _riscosYMap;
+         std::vector<uint8_t> _riscosColorIds;
+-        bool _riscosNeedFullFrame{ true };
+         bool _riscosEventWatch{ false };
++        fheroes2::riscos::Presenter _riscosPresenter;
++        std::vector<fheroes2::riscos::PresentRect> _riscosRects;
++        std::vector<SDL_Rect> _riscosUpdateRects;
++
++        // Timings for the log (only when there is a log): every 10 seconds.
++        uint32_t _riscosLastFullFrame{ 0 };
++        bool _riscosStatsOn{ false };
++        fheroes2::riscos::PresentStats _riscosStats;
++        uint64_t _riscosStatsStart{ 0 };
++        uint64_t _riscosConvertTicks{ 0 };
++        uint64_t _riscosPlotTicks{ 0 };
++        uint64_t _riscosPlotMaxTicks{ 0 };
+ 
+         bool _riscosAttachSurface()
+         {
+@@ -1486,7 +1504,7 @@ namespace
+                 return false;
+             }
+ 
+-            if ( surface->format->BitsPerPixel != 32 || surface->w <= 0 || surface->h <= 0 ) {
++            if ( surface->format->BitsPerPixel != 32 || surface->w <= 0 || surface->h <= 0 || ( surface->pitch % 4 ) != 0 ) {
+                 ERROR_LOG( "Unsupported window surface: " << SDL_GetPixelFormatName( surface->format->format ) << ", " << surface->w << " x " << surface->h )
+                 return false;
+             }
+@@ -1525,27 +1543,20 @@ namespace
+             _riscosDest.x = static_cast<int>( ( sw - _riscosDest.w ) / 2 );
+             _riscosDest.y = static_cast<int>( ( sh - _riscosDest.h ) / 2 );
+ 
+-            _riscosXMap.resize( static_cast<size_t>( _riscosDest.w ) );
+-            for ( int32_t x = 0; x < _riscosDest.w; ++x ) {
+-                _riscosXMap[x] = static_cast<int32_t>( static_cast<int64_t>( x ) * gw / _riscosDest.w );
++            _riscosPresenter.setGeometry( gw, gh, { _riscosDest.x, _riscosDest.y, _riscosDest.w, _riscosDest.h }, surface->w, surface->h );
++            if ( _palette32Bit.size() == 256 ) {
++                _riscosPresenter.setPalette( _palette32Bit.data() );
+             }
+ 
+-            _riscosYMap.resize( static_cast<size_t>( _riscosDest.h ) );
+-            for ( int32_t y = 0; y < _riscosDest.h; ++y ) {
+-                _riscosYMap[y] = static_cast<int32_t>( static_cast<int64_t>( y ) * gh / _riscosDest.h );
++            if ( _riscosStatsStart == 0 ) {
++                const char * log = getenv( "fheroes2$Log" );
++                _riscosStatsOn = ( log != nullptr && *log != '\0' );
++                _riscosStatsStart = SDL_GetPerformanceCounter();
+             }
+ 
+-            _riscosNeedFullFrame = true;
+-
+             return true;
+         }
+ 
+-        // First destination column (or row) whose source is at or after 'src'.
+-        static int32_t _riscosScaleUp( const int32_t src, const int32_t destSize, const int32_t gameSize )
+-        {
+-            return static_cast<int32_t>( ( static_cast<int64_t>( src ) * destSize + gameSize - 1 ) / gameSize );
+-        }
+-
+         void _riscosRender( const fheroes2::Display & display, const fheroes2::Rect & roi )
+         {
+             if ( _window == nullptr || _riscosSurface == nullptr || display.empty() ) {
+@@ -1564,81 +1575,85 @@ namespace
+                 }
+             }
+ 
+-            const int32_t gw = _riscosGameSize.width;
+-            const int32_t gh = _riscosGameSize.height;
+-            if ( display.width() != gw || display.height() != gh || _palette32Bit.size() != 256 ) {
++            if ( display.width() != _riscosGameSize.width || display.height() != _riscosGameSize.height || _palette32Bit.size() != 256 ) {
+                 return;
+             }
+ 
+-            const bool fullFrame = _riscosNeedFullFrame;
+-            fheroes2::Rect area = fullFrame ? fheroes2::Rect( 0, 0, gw, gh ) : roi;
+-            area.x = std::clamp( area.x, 0, gw );
+-            area.y = std::clamp( area.y, 0, gh );
+-            area.width = std::clamp( area.width, 0, gw - area.x );
+-            area.height = std::clamp( area.height, 0, gh - area.y );
++            if ( ( SDL_GetWindowFlags( _window ) & SDL_WINDOW_FULLSCREEN ) != 0 ) {
++                // In full screen the surface can be the screen memory itself, which nothing
++                // redraws if another program draws over it: everything again every 5 s.
++                const uint32_t now = SDL_GetTicks();
++                if ( now - _riscosLastFullFrame >= 5000 ) {
++                    _riscosPresenter.invalidate( true );
++                }
++            }
++            if ( _riscosPresenter.needsFullFrame() ) {
++                _riscosLastFullFrame = SDL_GetTicks();
++            }
+ 
+-            const int32_t dx0 = _riscosScaleUp( area.x, _riscosDest.w, gw );
+-            const int32_t dx1 = _riscosScaleUp( area.x + area.width, _riscosDest.w, gw );
+-            const int32_t dy0 = _riscosScaleUp( area.y, _riscosDest.h, gh );
+-            const int32_t dy1 = _riscosScaleUp( area.y + area.height, _riscosDest.h, gh );
++            const uint64_t start = _riscosStatsOn ? SDL_GetPerformanceCounter() : 0;
+ 
+             if ( SDL_MUSTLOCK( surface ) && SDL_LockSurface( surface ) < 0 ) {
+                 ERROR_LOG( "Failed to lock the window surface. The error: " << SDL_GetError() )
+                 return;
+             }
+ 
+-            if ( fullFrame ) {
+-                // Black borders around the scaled picture.
+-                SDL_FillRect( surface, nullptr, SDL_MapRGB( surface->format, 0, 0, 0 ) );
+-            }
+-
+-            const uint8_t * image = display.image();
+-            const uint32_t * palette = _palette32Bit.data();
+-            uint8_t * pixels = static_cast<uint8_t *>( surface->pixels );
+-            const int pitch = surface->pitch;
+-            const size_t rowBytes = static_cast<size_t>( dx1 - dx0 ) * 4;
++            _riscosPresenter.present( display.image(), roi.x, roi.y, roi.width, roi.height, static_cast<uint32_t *>( surface->pixels ), surface->pitch,
++                                      SDL_MapRGB( surface->format, 0, 0, 0 ), _riscosRects, _riscosStats );
+ 
+-            int32_t previousSrcY = -1;
+-            const uint32_t * previousRow = nullptr;
++            if ( SDL_MUSTLOCK( surface ) ) {
++                SDL_UnlockSurface( surface );
++            }
+ 
+-            for ( int32_t dy = dy0; dy < dy1; ++dy ) {
+-                // The pitch is a whole number of 32-bit pixels, so each row is word aligned.
+-                uint32_t * out = static_cast<uint32_t *>( static_cast<void *>( pixels + static_cast<ptrdiff_t>( _riscosDest.y + dy ) * pitch ) ) + _riscosDest.x + dx0;
+-                const int32_t srcY = _riscosYMap[dy];
++            const uint64_t converted = _riscosStatsOn ? SDL_GetPerformanceCounter() : 0;
+ 
+-                if ( srcY == previousSrcY && previousRow != nullptr ) {
+-                    // Scaled up: the same source row again.
+-                    memcpy( out, previousRow, rowBytes );
+-                    continue;
++            if ( !_riscosRects.empty() ) {
++                _riscosUpdateRects.resize( _riscosRects.size() );
++                for ( size_t i = 0; i < _riscosRects.size(); ++i ) {
++                    const fheroes2::riscos::PresentRect & r = _riscosRects[i];
++                    _riscosUpdateRects[i] = { r.x, r.y, r.w, r.h };
+                 }
+ 
+-                const uint8_t * in = image + static_cast<ptrdiff_t>( srcY ) * gw;
+-                const int32_t * xMap = _riscosXMap.data();
+-                for ( int32_t dx = dx0; dx < dx1; ++dx ) {
+-                    out[dx - dx0] = palette[in[xMap[dx]]];
++                if ( SDL_UpdateWindowSurfaceRects( _window, _riscosUpdateRects.data(), static_cast<int>( _riscosUpdateRects.size() ) ) < 0 ) {
++                    ERROR_LOG( "Failed to update the window surface. The error: " << SDL_GetError() )
+                 }
++            }
+ 
+-                previousSrcY = srcY;
+-                previousRow = out;
++            if ( _riscosStatsOn ) {
++                const uint64_t end = SDL_GetPerformanceCounter();
++                _riscosConvertTicks += converted - start;
++                _riscosPlotTicks += end - converted;
++                _riscosPlotMaxTicks = std::max( _riscosPlotMaxTicks, end - converted );
++                _riscosLogStats( end );
+             }
++        }
+ 
+-            if ( SDL_MUSTLOCK( surface ) ) {
+-                SDL_UnlockSurface( surface );
++        void _riscosLogStats( const uint64_t now )
++        {
++            const uint64_t frequency = SDL_GetPerformanceFrequency();
++            const uint64_t elapsed = now - _riscosStatsStart;
++            if ( frequency == 0 || elapsed < frequency * 10 ) {
++                return;
+             }
+ 
+-            _riscosNeedFullFrame = false;
++            const fheroes2::riscos::PresentStats & s = _riscosStats;
++            const auto ms = [frequency]( const uint64_t ticks ) { return static_cast<double>( ticks ) * 1000.0 / static_cast<double>( frequency ); };
++            const double seconds = static_cast<double>( elapsed ) / static_cast<double>( frequency );
++            const uint64_t count = std::max<uint64_t>( s.frames, 1 );
++            const double frames = static_cast<double>( count );
+ 
+-            SDL_Rect update;
+-            if ( fullFrame ) {
+-                update = { 0, 0, surface->w, surface->h };
+-            }
+-            else {
+-                update = { _riscosDest.x + dx0, _riscosDest.y + dy0, dx1 - dx0, dy1 - dy0 };
+-            }
++            VERBOSE_LOG( "Present " << _riscosSurfaceSize.width << "x" << _riscosSurfaceSize.height << " from " << _riscosGameSize.width << "x" << _riscosGameSize.height
++                                    << ": " << s.frames << " frames in " << static_cast<int>( seconds + 0.5 ) << " s (" << s.fullFrames << " full, " << s.paletteFrames
++                                    << " palette); convert " << ms( _riscosConvertTicks ) / frames << " ms/frame, plot " << ms( _riscosPlotTicks ) / frames
++                                    << " ms/frame (max " << ms( _riscosPlotMaxTicks ) << "); " << ms( _riscosConvertTicks + _riscosPlotTicks ) / seconds / 10.0
++                                    << "% of the time; per frame " << s.pixelsConverted / count << " pixels converted, " << s.pixelsPlotted / count
++                                    << " plotted in " << static_cast<double>( s.rects ) / frames << " rectangles" )
+ 
+-            if ( update.w > 0 && update.h > 0 && SDL_UpdateWindowSurfaceRects( _window, &update, 1 ) < 0 ) {
+-                ERROR_LOG( "Failed to update the window surface. The error: " << SDL_GetError() )
+-            }
++            _riscosStats = {};
++            _riscosConvertTicks = 0;
++            _riscosPlotTicks = 0;
++            _riscosPlotMaxTicks = 0;
++            _riscosStatsStart = now;
+         }
+ 
+         int32_t _riscosToGameX( const int32_t x ) const
+@@ -1850,6 +1865,19 @@ namespace fheroes2
+ 
+     void Display::_renderFrame( const Rect & roi ) const
+     {
++#if defined( __riscos__ )
++        // RISC OS: a new palette (the colour cycling, every 220 ms) doesn't need the whole
++        // frame: the engine redraws only the pixels whose colour changed.
++        if ( _preprocessing ) {
++            std::vector<uint8_t> palette;
++            if ( _preprocessing( palette ) ) {
++                _engine->updatePalette( palette );
++            }
++        }
++
++        _engine->render( *this, getBoundaryRect( roi, _prevRoi ) );
++        return;
++#endif
+         bool updateImage = true;
+         if ( _preprocessing ) {
+             std::vector<uint8_t> palette;

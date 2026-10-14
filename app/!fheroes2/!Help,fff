@@ -74,6 +74,17 @@ instead of the MIDI music (choose the music type in the game's audio
 settings). MP3 and FLAC tracks with the same names work too.
 
 
+Speed
+-----
+If the game is slow, or other programs are while it runs:
+- A smaller game resolution (System options) means less to draw.
+- The music takes processor time: at 22050 Hz it takes about half.
+  Remove the | in front of "Set fheroes2$AudioRate 22050" in !Run
+  (the sound effects don't change; the music loses its highest
+  frequencies). Turning the music off in the audio settings saves
+  the most.
+
+
 Logging
 -------
 Normally nothing is logged. If something goes wrong, turn the log on

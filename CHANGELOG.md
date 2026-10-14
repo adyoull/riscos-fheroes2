@@ -1,5 +1,39 @@
 # riscos-fheroes2 changes
 
+## 1.1.17-riscos7test
+
+Faster drawing, mostly for the Pi: the game's 8-bit screen is converted
+into the window (or the screen) only where it changed.
+
+- **Only what changed is drawn** (new patch 0006, `riscos_present.h`).
+  Converting the game screen to the desktop's colours, and plotting it,
+  cost more than the game's own drawing. The colour cycling (water, lava:
+  17 colours every 220 ms) made every cycle redraw the whole screen, even
+  in menus with no water.
+  - A copy of the last frame is kept; only pixels that differ from it are
+    converted, and only the 64 x 16 pixel cells that changed are plotted.
+  - A colour cycle redraws only pixels in the cycling colours.
+  - Scaled pictures are never read back from the screen; the black
+    borders are filled only when the size changes.
+  - In full screen everything is redrawn every 5 seconds anyway, in case
+    another program drew over the screen.
+  - Replaying 880 frames recorded from a game on the adventure map
+    (1024 x 768): per frame 35,000 pixels converted instead of 1.1
+    million and 63,000 plotted instead of 742,000 in a 1:1 window
+    (scaled x2: 139,000 instead of 4.4 million converted), with the
+    same picture every frame. Not yet timed on a Pi.
+- **The time spent drawing is logged** (with logging on, so in test
+  builds): every 10 seconds, the frames, milliseconds per frame
+  converting and plotting, and the pixels and rectangles per frame.
+- **`fheroes2$AudioRate`** (new patch 0007): `Set fheroes2$AudioRate
+  22050` (in `!Run`, commented out) mixes the sound at 22050 Hz instead
+  of 44100. The MIDI music then takes about half the processor time; the
+  sound effects are 22050 Hz anyway.
+- **Compiled with -O3**, upstream's own setting (the -O2 for the RISC OS
+  build used to override it).
+- New host tests: `tests/present/run.sh` (ASan/UBSan, mutation-checked)
+  and `tests/present/bench.cpp`.
+
 ## 1.1.17-riscos3 (tag `v1.1.17-riscos3`)
 
 The riscos6test build, released, with logging off by default (remove the
