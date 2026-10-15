@@ -31,6 +31,7 @@ the application's `!Help`.
   | 0005 | Waits that let the desktop run; 4096-sample audio buffer |
   | 0006 | Present only what changed (`src/engine/riscos_present.h`): pixels that differ from the last frame, colours the palette cycling changed |
   | 0007 | `fheroes2$AudioRate` to choose the sound output rate |
+  | 0008 | Log stalls (with a log): what held the game, and the heap's size |
 
 - The program is linked statically and converted to an Absolute (AIF)
   file with elf2aif, so `!SharedLibs` isn't needed.

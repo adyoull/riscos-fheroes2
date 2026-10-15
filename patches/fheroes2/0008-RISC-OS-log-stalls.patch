@@ -1,0 +1,495 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <adyoull@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 19:45:54 +0100
+Subject: [PATCH] RISC OS: log stalls
+
+A player reported the game stopping completely for 2-3 seconds every
+10-20 minutes. With a log (fheroes2$Log), the game now records when it
+stops for more than half a second, and why as far as it can tell:
+
+- it ran without checking for events, so nothing else on the desktop
+  could run either (with the step in progress: saving the autosave,
+  starting a music track, a computer player's turn, the new day);
+- checking for events (Wimp_Poll) took long: the desktop or another
+  program held the computer;
+- a wait took much longer than asked;
+- one of those named steps took more than 300 ms.
+
+Each line has the size of the heap (the "fheroes2 Heap" dynamic areas),
+which is also added to the drawing times logged every 10 seconds.
+---
+ src/engine/audio.cpp                   |   8 ++
+ src/engine/localevent.cpp              |  18 +++
+ src/engine/riscos.cpp                  | 191 +++++++++++++++++++++++++
+ src/engine/riscos.h                    |  42 ++++++
+ src/engine/screen.cpp                  |   4 +-
+ src/engine/timing.cpp                  |   4 +
+ src/fheroes2/ai/ai_planner_kingdom.cpp |   7 +
+ src/fheroes2/game/game_io.cpp          |   7 +
+ src/fheroes2/world/world.cpp           |   7 +
+ 9 files changed, 287 insertions(+), 1 deletion(-)
+
+diff --git a/src/engine/audio.cpp b/src/engine/audio.cpp
+index 9018128..fbfd288 100644
+--- a/src/engine/audio.cpp
++++ b/src/engine/audio.cpp
+@@ -63,6 +63,10 @@
+ #include "thread.h"
+ #include "timing.h"
+ 
++#if defined( __riscos__ )
++#include "riscos.h"
++#endif
++
+ namespace
+ {
+     struct AudioSpec
+@@ -511,6 +515,10 @@ namespace
+         // not be called while we are modifying the current track information.
+         assert( !Music::isPlaying() );
+ 
++#if defined( __riscos__ )
++        const RiscOS::Stall::Step step( "starting a music track" );
++#endif
++
+         musicTrackManager.clearFinishedMusic();
+ 
+         const std::shared_ptr<MusicInfo> track = musicTrackManager.getTrackFromMusicDB( musicUID );
+diff --git a/src/engine/localevent.cpp b/src/engine/localevent.cpp
+index 11d4aa3..24021f8 100644
+--- a/src/engine/localevent.cpp
++++ b/src/engine/localevent.cpp
+@@ -22,6 +22,9 @@
+  ***************************************************************************/
+ 
+ #include "localevent.h"
++#if defined( __riscos__ )
++#include "riscos.h"
++#endif
+ 
+ #include <cassert>
+ #include <cmath>
+@@ -423,7 +426,13 @@ namespace EventProcessing
+ 
+         static void sleep( const uint32_t milliseconds )
+         {
++#if defined( __riscos__ )
++            const uint64_t start = RiscOS::Stall::ticks();
++            SDL_Delay( milliseconds );
++            RiscOS::Stall::waited( milliseconds, start );
++#else
+             SDL_Delay( milliseconds );
++#endif
+         }
+ 
+         bool handleEvents( LocalEvent & eventHandler, const bool allowExit, bool & updateDisplay )
+@@ -1255,9 +1264,18 @@ bool LocalEvent::HandleEvents( const bool sleepAfterEventProcessing /* = true */
+ 
+     bool isDisplayRefreshRequired = false;
+ 
++#if defined( __riscos__ )
++    RiscOS::Stall::eventsBegin();
++    const bool handled = _engine->handleEvents( *this, allowExit, isDisplayRefreshRequired );
++    RiscOS::Stall::eventsEnd();
++    if ( !handled ) {
++        return false;
++    }
++#else
+     if ( !_engine->handleEvents( *this, allowExit, isDisplayRefreshRequired ) ) {
+         return false;
+     }
++#endif
+ 
+     if ( _engine->isControllerValid() ) {
+         ProcessControllerAxisMotion();
+diff --git a/src/engine/riscos.cpp b/src/engine/riscos.cpp
+index bf05b1c..933e6ea 100644
+--- a/src/engine/riscos.cpp
++++ b/src/engine/riscos.cpp
+@@ -22,11 +22,30 @@
+ 
+ #include "riscos.h"
+ 
++#include <atomic>
+ #include <cstdio>
+ #include <cstdlib>
++#include <cstring>
+ 
++// Managing compiler warnings for SDL headers
++#if defined( __GNUC__ )
++#pragma GCC diagnostic push
++
++#pragma GCC diagnostic ignored "-Wswitch-default"
++#endif
++
++#include <SDL_timer.h>
++
++// Managing compiler warnings for SDL headers
++#if defined( __GNUC__ )
++#pragma GCC diagnostic pop
++#endif
++
++#include <kernel.h>
+ #include <unistd.h>
+ 
++#include "logging.h"
++
+ // UnixLib: the C heap goes in a dynamic area with this name, so the WimpSlot only has
+ // to hold the program. UnixLib 5.0.3.1 adds more areas ("fheroes2 Heap 2"...) if one
+ // isn't enough, and removes them all when the program ends.
+@@ -57,4 +76,176 @@ void RiscOS::redirectOutput()
+     (void)freopen( "/dev/null", "w", stderr );
+ }
+ 
++namespace
++{
++    // Longer than this is a stall worth logging.
++    const uint64_t stallMs = 500;
++    const uint64_t stepMs = 300;
++
++    int enabledState = -1;
++
++    // Main thread only.
++    uint64_t eventsStart = 0;
++    uint64_t lastEventsEnd = 0;
++    uint64_t waitedSinceEvents = 0;
++
++    // The step in progress (any thread), for the log.
++    std::atomic<const char *> currentStep{ nullptr };
++    // The last step that ended since the previous event check.
++    std::atomic<const char *> endedStep{ nullptr };
++
++    // Read from any thread.
++    std::atomic<uint64_t> heapCache{ 0 };
++    std::atomic<uint64_t> heapRead{ 0 };
++
++    double toMs( const uint64_t ticks )
++    {
++        const uint64_t frequency = SDL_GetPerformanceFrequency();
++        return frequency == 0 ? 0.0 : static_cast<double>( ticks ) * 1000.0 / static_cast<double>( frequency );
++    }
++
++    uint64_t msToTicks( const uint64_t ms )
++    {
++        return ms * SDL_GetPerformanceFrequency() / 1000;
++    }
++
++    double heapMB()
++    {
++        return static_cast<double>( RiscOS::Stall::heapBytes() ) / ( 1024.0 * 1024.0 );
++    }
++
++    const char * stepName()
++    {
++        const char * step = currentStep.load();
++        return step != nullptr ? step : "none";
++    }
++
++    const char * endedStepName()
++    {
++        const char * step = endedStep.load();
++        return step != nullptr ? step : "none";
++    }
++}
++
++bool RiscOS::Stall::enabled()
++{
++    if ( enabledState < 0 ) {
++        const char * log = getenv( "fheroes2$Log" );
++        enabledState = ( log != nullptr && *log != '\0' ) ? 1 : 0;
++    }
++    return enabledState == 1;
++}
++
++uint64_t RiscOS::Stall::ticks()
++{
++    return SDL_GetPerformanceCounter();
++}
++
++void RiscOS::Stall::eventsBegin()
++{
++    if ( !enabled() ) {
++        return;
++    }
++
++    eventsStart = ticks();
++    if ( lastEventsEnd != 0 ) {
++        const uint64_t span = eventsStart - lastEventsEnd;
++        const uint64_t busy = span > waitedSinceEvents ? span - waitedSinceEvents : 0;
++        if ( busy > msToTicks( stallMs ) ) {
++            VERBOSE_LOG( "Stall: the game ran " << toMs( busy ) << " ms without checking for events (the desktop could not run); step: " << stepName()
++                                                  << ", last step ended: " << endedStepName() << "; heap " << heapMB() << " MB" )
++        }
++    }
++    waitedSinceEvents = 0;
++    endedStep.store( nullptr );
++}
++
++void RiscOS::Stall::eventsEnd()
++{
++    if ( !enabled() ) {
++        return;
++    }
++
++    lastEventsEnd = ticks();
++    const uint64_t took = lastEventsEnd - eventsStart;
++    if ( took > msToTicks( stallMs ) ) {
++        VERBOSE_LOG( "Stall: checking for events took " << toMs( took ) << " ms (the desktop or another program held the computer); step: " << stepName()
++                                                           << "; heap " << heapMB() << " MB" )
++    }
++}
++
++void RiscOS::Stall::waited( const uint32_t requestedMs, const uint64_t startTicks )
++{
++    if ( !enabled() ) {
++        return;
++    }
++
++    const uint64_t took = ticks() - startTicks;
++    waitedSinceEvents += took;
++    if ( took > msToTicks( requestedMs + stallMs ) ) {
++        VERBOSE_LOG( "Stall: a wait of " << requestedMs << " ms took " << toMs( took ) << " ms (the desktop or another program held the computer); step: "
++                                         << stepName() << "; heap " << heapMB() << " MB" )
++    }
++}
++
++uint64_t RiscOS::Stall::heapBytes()
++{
++    const uint64_t now = ticks();
++    const uint64_t read = heapRead.load();
++    if ( read != 0 && now - read < SDL_GetPerformanceFrequency() ) {
++        return heapCache.load();
++    }
++    heapRead.store( now );
++
++    // OS_DynamicArea 3 lists the areas, OS_DynamicArea 2 gives each one's size (R2) and name (R8).
++    uint64_t total = 0;
++    int area = -1;
++    for ( int guard = 0; guard < 4096; ++guard ) {
++        _kernel_swi_regs regs;
++        regs.r[0] = 3;
++        regs.r[1] = area;
++        if ( _kernel_swi( 0x66, &regs, &regs ) != nullptr ) {
++            break;
++        }
++        area = regs.r[1];
++        if ( area == -1 ) {
++            break;
++        }
++
++        _kernel_swi_regs info;
++        info.r[0] = 2;
++        info.r[1] = area;
++        if ( _kernel_swi( 0x66, &info, &info ) != nullptr ) {
++            continue;
++        }
++        const char * name = reinterpret_cast<const char *>( info.r[8] );
++        if ( name != nullptr && std::strncmp( name, __dynamic_da_name, std::strlen( __dynamic_da_name ) ) == 0 ) {
++            total += static_cast<uint32_t>( info.r[2] );
++        }
++    }
++
++    heapCache.store( total );
++    return total;
++}
++
++RiscOS::Stall::Step::Step( const char * name )
++    : _name( name )
++    , _previous( currentStep.exchange( name ) )
++    , _start( enabled() ? ticks() : 0 )
++{}
++
++RiscOS::Stall::Step::~Step()
++{
++    currentStep.store( _previous );
++    endedStep.store( _name );
++    if ( !enabled() ) {
++        return;
++    }
++
++    const uint64_t took = ticks() - _start;
++    if ( took > msToTicks( stepMs ) ) {
++        VERBOSE_LOG( "Slow step: " << _name << " took " << toMs( took ) << " ms; heap " << heapMB() << " MB" )
++    }
++}
++
+ #endif
+diff --git a/src/engine/riscos.h b/src/engine/riscos.h
+index 04c9327..ea966bb 100644
+--- a/src/engine/riscos.h
++++ b/src/engine/riscos.h
+@@ -20,6 +20,8 @@
+ 
+ #pragma once
+ 
++#include <cstdint>
++
+ #if defined( __riscos__ )
+ namespace RiscOS
+ {
+@@ -27,5 +29,45 @@ namespace RiscOS
+     // Sends stdout and stderr to the file named by fheroes2$Log (a UnixLib
+     // file name), or nowhere when it isn't set.
+     void redirectOutput();
++
++    // Stall log (only when there is a log, fheroes2$Log): records in the log when the game
++    // stops for longer than half a second, and why, as far as the game can tell:
++    // - the game ran without checking for events (nothing else on the desktop could run);
++    // - checking for events (Wimp_Poll) took long: other programs held the computer;
++    // - a wait took much longer than asked;
++    // - a named step (saving, starting music) took long.
++    // Each line has the size of the heap (the "fheroes2 Heap" dynamic areas).
++    namespace Stall
++    {
++        bool enabled();
++
++        // Around the SDL event check in LocalEvent::HandleEvents (main thread).
++        void eventsBegin();
++        void eventsEnd();
++
++        // After a wait of 'requestedMs' that started at 'startTicks' (main thread).
++        void waited( uint32_t requestedMs, uint64_t startTicks );
++
++        uint64_t ticks();
++
++        // The heap's size in bytes (all "fheroes2 Heap" areas), read at most once a second.
++        uint64_t heapBytes();
++
++        // A named step: logged if it takes longer than 300 ms. Any thread.
++        class Step
++        {
++        public:
++            explicit Step( const char * name );
++            ~Step();
++
++            Step( const Step & ) = delete;
++            Step & operator=( const Step & ) = delete;
++
++        private:
++            const char * _name;
++            const char * _previous;
++            uint64_t _start;
++        };
++    }
+ }
+ #endif
+diff --git a/src/engine/screen.cpp b/src/engine/screen.cpp
+index 4ab5189..2b2485f 100644
+--- a/src/engine/screen.cpp
++++ b/src/engine/screen.cpp
+@@ -65,6 +65,7 @@
+ #include <SDL_timer.h>
+ 
+ #include "riscos_present.h"
++#include "riscos.h"
+ #endif
+ 
+ #include "image_palette.h"
+@@ -1647,7 +1648,8 @@ namespace
+                                     << " palette); convert " << ms( _riscosConvertTicks ) / frames << " ms/frame, plot " << ms( _riscosPlotTicks ) / frames
+                                     << " ms/frame (max " << ms( _riscosPlotMaxTicks ) << "); " << ms( _riscosConvertTicks + _riscosPlotTicks ) / seconds / 10.0
+                                     << "% of the time; per frame " << s.pixelsConverted / count << " pixels converted, " << s.pixelsPlotted / count
+-                                    << " plotted in " << static_cast<double>( s.rects ) / frames << " rectangles" )
++                                    << " plotted in " << static_cast<double>( s.rects ) / frames << " rectangles; heap "
++                                    << static_cast<double>( RiscOS::Stall::heapBytes() ) / ( 1024.0 * 1024.0 ) << " MB" )
+ 
+             _riscosStats = {};
+             _riscosConvertTicks = 0;
+diff --git a/src/engine/timing.cpp b/src/engine/timing.cpp
+index 292e7ec..6f56d7d 100644
+--- a/src/engine/timing.cpp
++++ b/src/engine/timing.cpp
+@@ -36,6 +36,8 @@
+ #if defined( __GNUC__ )
+ #pragma GCC diagnostic pop
+ #endif
++
++#include "riscos.h"
+ #endif
+ 
+ namespace fheroes2
+@@ -45,7 +47,9 @@ namespace fheroes2
+ #if defined( __riscos__ )
+         // RISC OS: UnixLib's sleep_for spins without letting other desktop programs run;
+         // the SDL driver's SDL_Delay waits in Wimp_PollIdle (main thread, in a window).
++        const uint64_t start = RiscOS::Stall::ticks();
+         SDL_Delay( delayMs );
++        RiscOS::Stall::waited( delayMs, start );
+ #else
+         std::this_thread::sleep_for( std::chrono::milliseconds( delayMs ) );
+ #endif
+diff --git a/src/fheroes2/ai/ai_planner_kingdom.cpp b/src/fheroes2/ai/ai_planner_kingdom.cpp
+index 32a8157..8cbeb80 100644
+--- a/src/fheroes2/ai/ai_planner_kingdom.cpp
++++ b/src/fheroes2/ai/ai_planner_kingdom.cpp
+@@ -65,6 +65,10 @@
+ #include "world_pathfinding.h"
+ #include "world_regions.h"
+ 
++#if defined( __riscos__ )
++#include "riscos.h"
++#endif
++
+ namespace
+ {
+     struct HeroValue
+@@ -622,6 +626,9 @@ void AI::Planner::updatePriorityAttackTarget( const Kingdom & kingdom, const Map
+ 
+ fheroes2::GameMode AI::Planner::KingdomTurn( Kingdom & kingdom )
+ {
++#if defined( __riscos__ )
++    const RiscOS::Stall::Step step( "a computer player's turn" );
++#endif
+     class AIAutoControlModeCommitter
+     {
+     public:
+diff --git a/src/fheroes2/game/game_io.cpp b/src/fheroes2/game/game_io.cpp
+index 78d3daf..a1ec418 100644
+--- a/src/fheroes2/game/game_io.cpp
++++ b/src/fheroes2/game/game_io.cpp
+@@ -49,6 +49,10 @@
+ #include "world.h"
+ #include "zzlib.h"
+ 
++#if defined( __riscos__ )
++#include "riscos.h"
++#endif
++
+ namespace
+ {
+     const std::string autoSaveName{ "AUTOSAVE" };
+@@ -105,6 +109,9 @@ namespace
+ 
+ bool Game::AutoSave()
+ {
++#if defined( __riscos__ )
++    const RiscOS::Stall::Step step( "saving the autosave" );
++#endif
+     return Game::Save( System::concatPath( GetSaveDir(), autoSaveName + GetSaveFileExtension() ), true );
+ }
+ 
+diff --git a/src/fheroes2/world/world.cpp b/src/fheroes2/world/world.cpp
+index d47b625..72db626 100644
+--- a/src/fheroes2/world/world.cpp
++++ b/src/fheroes2/world/world.cpp
+@@ -65,6 +65,10 @@
+ #include "week.h"
+ #include "world_object_uid.h"
+ 
++#if defined( __riscos__ )
++#include "riscos.h"
++#endif
++
+ namespace
+ {
+     bool isTileBlockedForSettingMonster( const int32_t tileId, const int32_t radius, const std::set<int32_t> & excludeTiles )
+@@ -423,6 +427,9 @@ const Week & World::GetWeekType() const
+ 
+ void World::NewDay()
+ {
++#if defined( __riscos__ )
++    const RiscOS::Stall::Step step( "the new day" );
++#endif
+     ++_day;
+ 
+     if ( BeginWeek() ) {

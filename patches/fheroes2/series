@@ -5,3 +5,4 @@
 0005-RISC-OS-waits-let-the-desktop-run-4096-sample-audio-.patch
 0006-RISC-OS-present-only-what-changed.patch
 0007-RISC-OS-fheroes2-AudioRate-to-choose-the-sound-outpu.patch
+0008-RISC-OS-log-stalls.patch

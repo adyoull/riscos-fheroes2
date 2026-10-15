@@ -1,5 +1,27 @@
 # riscos-fheroes2 changes
 
+## 1.1.17-riscos8test
+
+Diagnostics for a reported pause: "sometimes, no more than once every 10
+to 20 minutes, the game completely stops for 2 to 3 seconds, then starts
+again" (Pi, riscos4).
+
+- **Stalls are logged** (new patch 0008; test builds log by default).
+  When the game stops for more than half a second the log says how:
+  - "the game ran N ms without checking for events": the game itself was
+    busy, so nothing else on the desktop ran either, with the step in
+    progress or just finished (saving the autosave, starting a music
+    track, a computer player's turn, the new day);
+  - "checking for events took N ms" or "a wait of N ms took M ms": the
+    desktop or another program held the computer;
+  - "Slow step: ... took N ms" for any of those steps over 300 ms.
+  Each line, and the drawing times every 10 seconds, has the heap's size,
+  to see whether a pause comes with the heap growing.
+- The icon bar showing over the game in full screen when the pointer
+  reaches the bottom of the screen (with "Bring icon bar forward
+  automatically") belongs to the SDL driver and has been passed to
+  riscos-mesa.
+
 ## 1.1.17-riscos4 (tag `v1.1.17-riscos4`)
 
 The riscos7test build, released, with logging off by default (remove the
