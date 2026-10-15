@@ -52,6 +52,11 @@ Playing
   stays a desktop task in full screen.
 - The game draws its own mouse pointer, so the desktop pointer is
   hidden while it is over the game window.
+- In full screen the pointer stops just above the bottom of the
+  screen, so the icon bar doesn't come forward over the game (with
+  "Bring icon bar forward automatically"). Shift-F12 still brings the
+  icon bar forward. *Set SDL$PointerMargin 0 turns this off; a bigger
+  number keeps the pointer further from the bottom.
 - Quit from the game's menu, the window's close icon, or the icon bar.
 
 

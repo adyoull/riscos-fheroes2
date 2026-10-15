@@ -11,7 +11,7 @@ Put these in `dl/` (their SHA-256 sums are in `build/SHA256SUMS.txt`):
 | File | From |
 |---|---|
 | `riscos-crossdev-toolchain-1.3-x86_64-linux.tar.xz` | riscos-crossdev release 1.3 |
-| `riscos-mesa-devkit-20.3.5-12.tgz` | riscos-mesa release 20.3.5-12 |
+| `riscos-mesa-devkit-20.3.5-17b.tgz` | riscos-mesa test devkit 20.3.5-17b (MESA/ on the shared drive; 20.3.5-16 + the full-screen pointer margin) |
 | `unixlib-5.0.3.3/libunixlib.a` | riscos-unixlib release 5.0.3.3 (put over the toolchain's 5.0.3.2 by `prepare-toolchain.sh`) |
 | `fheroes2-1.1.17.tar.gz` | `git archive --prefix=fheroes2-1.1.17/` of tag 1.1.17 (2685c21) |
 | `SDL2_mixer-2.6.3.tar.gz` | libsdl.org release |

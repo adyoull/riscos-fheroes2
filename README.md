@@ -13,7 +13,7 @@ the application's `!Help`.
   1.3 (GCCSDK GCC 10.2, PThreadTicker 0.03; static only), with UnixLib
   replaced by the [riscos-unixlib](https://github.com/adyoull/riscos-unixlib)
   5.0.3.3 release.
-- **SDL2:** the riscos-mesa devkit 20.3.5-12 (SDL 2.26 with the RISC OS video
+- **SDL2:** the riscos-mesa devkit 20.3.5-17b (test; SDL 2.26 with the RISC OS video
   and SharedSoundBuffer sound drivers), used as it is.
 - **SDL2_mixer 2.6.3**: WAV; Ogg Vorbis, MP3 and FLAC with its bundled
   decoders (stb_vorbis, dr_mp3, dr_flac); and MIDI through a new decoder

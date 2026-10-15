@@ -1,5 +1,18 @@
 # riscos-fheroes2 changes
 
+## 1.1.17-riscos9test
+
+- Linked with the riscos-mesa **test** devkit **20.3.5-17b** (was the
+  20.3.5-12 release): 20.3.5-16 plus riscos-mesa's fix for the icon bar
+  flashing over the game in full screen with "Bring icon bar forward
+  automatically" (reported on riscos4). While the pointer is over the
+  full-screen game it stops 2 pixels above the bottom of the screen, so
+  the Wimp no longer brings the icon bar forward; the lowest row it can
+  reach counts as the bottom row, so the map still scrolls. Shift-F12
+  still brings the icon bar forward. `*Set SDL$PointerMargin <pixels>`
+  changes the margin (0 turns it off). Not tried on a Pi yet.
+- The stall log from riscos8test stays (test builds log by default).
+
 ## 1.1.17-riscos8test
 
 Diagnostics for a reported pause: "sometimes, no more than once every 10

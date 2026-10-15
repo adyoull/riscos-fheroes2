@@ -14,14 +14,14 @@
 RFH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 : "${GCCSDK_ENV:=/opt/rx/riscos-crossdev-toolchain-1.3-x86_64-linux}"
-: "${DEVKIT:=/opt/dk/riscos-mesa-devkit-20.3.5-12}"
+: "${DEVKIT:=/opt/dk/riscos-mesa-devkit-20.3.5-17b}"
 : "${DL:=$RFH_ROOT/dl}"
 : "${SRC:=$RFH_ROOT/src}"
 : "${STAGE:=$RFH_ROOT/stage}"
 : "${JOBS:=$(nproc)}"
 
 FHEROES2_VERSION=1.1.17
-RISCOS_REL=riscos8test
+RISCOS_REL=riscos9test
 MIXER_VERSION=2.6.3
 MIDISYNTH_VERSION=0.4.2
 # riscos-unixlib release linked instead of crossdev 1.3's 5.0.3.2. Its public
