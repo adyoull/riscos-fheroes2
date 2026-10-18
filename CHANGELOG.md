@@ -1,5 +1,11 @@
 # riscos-fheroes2 changes
 
+## 1.1.17-riscos5 (tag `v1.1.17-riscos5`)
+
+The riscos9test build, tested on a Pi and released, with logging off by
+default (remove the `|` in front of `Set fheroes2$LogOn 1` in `!Run` to
+get a log, which also has the drawing times and any stalls).
+
 ## 1.1.17-riscos9test
 
 - Linked with the riscos-mesa **test** devkit **20.3.5-17b** (was the
