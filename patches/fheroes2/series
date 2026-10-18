@@ -6,3 +6,4 @@
 0006-RISC-OS-present-only-what-changed.patch
 0007-RISC-OS-fheroes2-AudioRate-to-choose-the-sound-outpu.patch
 0008-RISC-OS-log-stalls.patch
+0009-RISC-OS-watchdog-for-lock-ups.patch

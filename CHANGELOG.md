@@ -1,5 +1,23 @@
 # riscos-fheroes2 changes
 
+## 1.1.17-riscos10test
+
+Diagnostics for a lock-up: a game on the Pi locked up for a long time and
+then crashed, and the log said nothing about it, because a stall is only
+logged when it ends.
+
+- **Lock-up watchdog** (new patch 0009, with logging on, so in test
+  builds). While no check for events has finished for more than 3
+  seconds, a separate thread logs every 5 seconds: what the game's main
+  thread is doing (game code, checking for events, waiting or drawing),
+  the step in progress (autosave, music track, computer player's turn,
+  new day), when sound was last mixed, and the heap size. If the game is
+  stuck inside another program's turn on the desktop, nothing can be
+  logged until that ends.
+- Logs from riscos9test showed no stall in the game itself: two pauses
+  of exactly 4 seconds were spent in the desktop (another program), and
+  computer players' turns take up to 2.8 seconds.
+
 ## 1.1.17-riscos5 (tag `v1.1.17-riscos5`)
 
 The riscos9test build, tested on a Pi and released, with logging off by

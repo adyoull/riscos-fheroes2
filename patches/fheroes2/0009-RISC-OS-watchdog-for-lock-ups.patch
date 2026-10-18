@@ -1,0 +1,234 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andrew Youll <adyoull@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 17:51:54 +0100
+Subject: [PATCH] RISC OS: watchdog for lock-ups
+
+The stall log writes a line when a stall ends, so a lock-up that never
+ended (the game was then killed) left nothing in the log. A watchdog
+thread now logs every 5 seconds while no event check has finished for
+more than 3 seconds: what the main thread is doing (game code, checking
+for events, waiting, drawing), the step in progress, when sound was
+last mixed (Mix_SetPostMix), and the heap size. Only with a log.
+---
+ src/engine/audio.cpp      |  7 ++++
+ src/engine/localevent.cpp |  1 +
+ src/engine/riscos.cpp     | 78 +++++++++++++++++++++++++++++++++++++++
+ src/engine/riscos.h       | 25 +++++++++++++
+ src/engine/screen.cpp     |  1 +
+ src/engine/timing.cpp     |  1 +
+ 6 files changed, 113 insertions(+)
+
+diff --git a/src/engine/audio.cpp b/src/engine/audio.cpp
+index fbfd288..0cb14d3 100644
+--- a/src/engine/audio.cpp
++++ b/src/engine/audio.cpp
+@@ -686,6 +686,13 @@ void Audio::Init()
+         return;
+     }
+ 
++#if defined( __riscos__ )
++    // For the watchdog's "sound last mixed" (only with a log).
++    if ( RiscOS::Stall::enabled() ) {
++        Mix_SetPostMix( []( void *, Uint8 *, int ) { RiscOS::Stall::audioAlive(); }, nullptr );
++    }
++#endif
++
+     int frequency = 0;
+     uint16_t format = 0;
+     int channels = 0;
+diff --git a/src/engine/localevent.cpp b/src/engine/localevent.cpp
+index 24021f8..6aab2b4 100644
+--- a/src/engine/localevent.cpp
++++ b/src/engine/localevent.cpp
+@@ -427,6 +427,7 @@ namespace EventProcessing
+         static void sleep( const uint32_t milliseconds )
+         {
+ #if defined( __riscos__ )
++            const RiscOS::Stall::Activity activity( "waiting" );
+             const uint64_t start = RiscOS::Stall::ticks();
+             SDL_Delay( milliseconds );
+             RiscOS::Stall::waited( milliseconds, start );
+diff --git a/src/engine/riscos.cpp b/src/engine/riscos.cpp
+index 933e6ea..de287c1 100644
+--- a/src/engine/riscos.cpp
++++ b/src/engine/riscos.cpp
+@@ -23,6 +23,11 @@
+ #include "riscos.h"
+ 
+ #include <atomic>
++#include <chrono>
++#include <condition_variable>
++#include <mutex>
++#include <string>
++#include <thread>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+@@ -94,6 +99,13 @@ namespace
+     // The last step that ended since the previous event check.
+     std::atomic<const char *> endedStep{ nullptr };
+ 
++    // For the watchdog (written by the main thread or the audio thread, read by the watchdog).
++    std::atomic<uint64_t> lastEventsEndShared{ 0 };
++    std::atomic<const char *> mainActivity{ "game code" };
++    std::atomic<uint64_t> mainActivitySince{ 0 };
++    std::atomic<uint64_t> lastAudio{ 0 };
++    std::atomic<bool> watchdogStarted{ false };
++
+     // Read from any thread.
+     std::atomic<uint64_t> heapCache{ 0 };
+     std::atomic<uint64_t> heapRead{ 0 };
+@@ -127,6 +139,64 @@ namespace
+     }
+ }
+ 
++namespace
++{
++    const uint64_t watchdogStuckMs = 3000;
++    const uint64_t watchdogRepeatMs = 5000;
++
++    void watchdogThread()
++    {
++        // A timed wait on a condition that is never signalled: UnixLib's scheduler leaves
++        // the thread asleep until the timeout, so it costs nothing in between.
++        std::mutex mutex;
++        std::condition_variable never;
++        std::unique_lock<std::mutex> lock( mutex );
++        uint64_t lastReport = 0;
++
++        for ( ;; ) {
++            never.wait_for( lock, std::chrono::seconds( 1 ) );
++
++            const uint64_t now = RiscOS::Stall::ticks();
++            const uint64_t eventsEnd = lastEventsEndShared.load();
++            if ( eventsEnd == 0 || now - eventsEnd < msToTicks( watchdogStuckMs ) ) {
++                lastReport = 0;
++                continue;
++            }
++            if ( lastReport != 0 && now - lastReport < msToTicks( watchdogRepeatMs ) ) {
++                continue;
++            }
++            lastReport = now;
++
++            const uint64_t since = mainActivitySince.load();
++            const uint64_t audio = lastAudio.load();
++            std::string audioText = "never";
++            if ( audio != 0 ) {
++                audioText = std::to_string( static_cast<long>( toMs( now - audio ) ) ) + " ms ago";
++            }
++            VERBOSE_LOG( "Watchdog: no event check has finished for " << static_cast<long>( toMs( now - eventsEnd ) ) << " ms; main thread: "
++                                                                       << mainActivity.load() << " for " << static_cast<long>( toMs( now - since ) )
++                                                                       << " ms; step: " << stepName() << "; sound last mixed " << audioText << "; heap "
++                                                                       << heapMB() << " MB" )
++        }
++    }
++}
++
++RiscOS::Stall::Activity::Activity( const char * name )
++    : _previous( mainActivity.exchange( name ) )
++    , _previousSince( mainActivitySince.exchange( ticks() ) )
++{}
++
++RiscOS::Stall::Activity::~Activity()
++{
++    mainActivity.store( _previous );
++    mainActivitySince.store( _previousSince );
++}
++
++void RiscOS::Stall::audioAlive()
++{
++    lastAudio.store( ticks() );
++}
++
+ bool RiscOS::Stall::enabled()
+ {
+     if ( enabledState < 0 ) {
+@@ -148,6 +218,8 @@ void RiscOS::Stall::eventsBegin()
+     }
+ 
+     eventsStart = ticks();
++    mainActivity.store( "checking for events" );
++    mainActivitySince.store( eventsStart );
+     if ( lastEventsEnd != 0 ) {
+         const uint64_t span = eventsStart - lastEventsEnd;
+         const uint64_t busy = span > waitedSinceEvents ? span - waitedSinceEvents : 0;
+@@ -167,6 +239,12 @@ void RiscOS::Stall::eventsEnd()
+     }
+ 
+     lastEventsEnd = ticks();
++    lastEventsEndShared.store( lastEventsEnd );
++    mainActivity.store( "game code" );
++    mainActivitySince.store( lastEventsEnd );
++    if ( !watchdogStarted.exchange( true ) ) {
++        std::thread( watchdogThread ).detach();
++    }
+     const uint64_t took = lastEventsEnd - eventsStart;
+     if ( took > msToTicks( stallMs ) ) {
+         VERBOSE_LOG( "Stall: checking for events took " << toMs( took ) << " ms (the desktop or another program held the computer); step: " << stepName()
+diff --git a/src/engine/riscos.h b/src/engine/riscos.h
+index ea966bb..b687e74 100644
+--- a/src/engine/riscos.h
++++ b/src/engine/riscos.h
+@@ -37,6 +37,12 @@ namespace RiscOS
+     // - a wait took much longer than asked;
+     // - a named step (saving, starting music) took long.
+     // Each line has the size of the heap (the "fheroes2 Heap" dynamic areas).
++    //
++    // A stall is logged when it ends, so a lock-up that never ends would leave nothing.
++    // A watchdog thread therefore logs every 5 seconds while no event check has finished
++    // for more than 3 seconds: what the main thread is doing, the step in progress, and
++    // when sound was last mixed. (It can only run while the game is the current task, so
++    // a lock-up inside another program shows as nothing until it ends.)
+     namespace Stall
+     {
+         bool enabled();
+@@ -53,6 +59,25 @@ namespace RiscOS
+         // The heap's size in bytes (all "fheroes2 Heap" areas), read at most once a second.
+         uint64_t heapBytes();
+ 
++        // What the main thread is doing ("waiting", "drawing"), for the watchdog. Main thread.
++        class Activity
++        {
++        public:
++            explicit Activity( const char * name );
++            ~Activity();
++
++            Activity( const Activity & ) = delete;
++            Activity & operator=( const Activity & ) = delete;
++
++        private:
++            const char * _previous;
++            uint64_t _previousSince;
++        };
++
++        // Called by SDL_mixer's audio thread after each mixed buffer (Mix_SetPostMix), so
++        // the watchdog can tell whether sound is still being mixed.
++        void audioAlive();
++
+         // A named step: logged if it takes longer than 300 ms. Any thread.
+         class Step
+         {
+diff --git a/src/engine/screen.cpp b/src/engine/screen.cpp
+index 2b2485f..a23099d 100644
+--- a/src/engine/screen.cpp
++++ b/src/engine/screen.cpp
+@@ -1592,6 +1592,7 @@ namespace
+                 _riscosLastFullFrame = SDL_GetTicks();
+             }
+ 
++            const RiscOS::Stall::Activity activity( "drawing" );
+             const uint64_t start = _riscosStatsOn ? SDL_GetPerformanceCounter() : 0;
+ 
+             if ( SDL_MUSTLOCK( surface ) && SDL_LockSurface( surface ) < 0 ) {
+diff --git a/src/engine/timing.cpp b/src/engine/timing.cpp
+index 6f56d7d..9b8dcc2 100644
+--- a/src/engine/timing.cpp
++++ b/src/engine/timing.cpp
+@@ -47,6 +47,7 @@ namespace fheroes2
+ #if defined( __riscos__ )
+         // RISC OS: UnixLib's sleep_for spins without letting other desktop programs run;
+         // the SDL driver's SDL_Delay waits in Wimp_PollIdle (main thread, in a window).
++        const RiscOS::Stall::Activity activity( "waiting" );
+         const uint64_t start = RiscOS::Stall::ticks();
+         SDL_Delay( delayMs );
+         RiscOS::Stall::waited( delayMs, start );
