@@ -7,3 +7,4 @@ bcdb35fbda9315f845bf207675c8a6e62b383005a4b0e35eea1007a717da9914  riscos-crossde
 07f1066b81ed582bd1fbed44fa7892f3ffaf20ad2cbe4b6ab7deafb2cd5df3ea  riscos-mesa-devkit-20.3.5-12.tgz
 e24f16c3f4612aae3871ceff521ab86b0d3ac4cc689d734e0e4085d02c774adf  libunixlib.a
 ccaadd67054187e373408a5ea7e59ce295ebb62f6adb0b9476ea63dd4e948d63  riscos-mesa-devkit-20.3.5-17b.tgz
+e0bea16a604265cde8d360055d2cb57dc38f4c7442954e599c393acd4c1395b8  riscos-mesa-devkit-20.3.5-17.tgz

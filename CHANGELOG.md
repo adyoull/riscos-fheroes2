@@ -1,5 +1,15 @@
 # riscos-fheroes2 changes
 
+## 1.1.17-riscos11test
+
+- Linked with the released riscos-mesa devkit **20.3.5-17** (was the test
+  devkit 20.3.5-17b). Its pointer margin (no icon bar over the game in full
+  screen) is the same code as 17b's; rendering is as in 20.3.5-16. It also
+  has riscos-mesa's new opt-in SDL overlay output
+  (`SDL_RISCOS_FB_RENDER_SIZE`, `SDL_RISCOS_FB_OVERLAY`), which this build
+  doesn't use yet.
+- The lock-up watchdog from riscos10test stays (test builds log).
+
 ## 1.1.17-riscos10test
 
 Diagnostics for a lock-up: a game on the Pi locked up for a long time and
