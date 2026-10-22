@@ -1,0 +1,10 @@
+# NAME TAG: the releases (github.com/adyoull/NAME) riscos-fheroes2 is built
+# with (riscos-crossdev's docs/CI.md). The riscos-crossdev line chooses the
+# container image the GitHub workflows build in, and so the toolchain. The
+# riscos-mesa line is the devkit (SDL2, zlib) and the riscos-softmidi line
+# the MIDI synthesiser's source and SoundFont that build/fetch.sh downloads;
+# their sha256s are in build/SHA256SUMS.txt (ci/riscos-deps-hook.sh moves
+# those lines with these).
+riscos-crossdev v1.8.2
+riscos-mesa v20.3.5-17
+riscos-softmidi v0.5.0

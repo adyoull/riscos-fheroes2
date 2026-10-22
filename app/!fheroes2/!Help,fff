@@ -69,7 +69,7 @@ Settings, saved games and the log of high scores go in
 Music
 -----
 The original game's music is MIDI. RISC OS has no MIDI synthesiser, so
-the game plays it with its own one (riscos-midisynth, TinySoundFont)
+the game plays it with its own one (riscos-softmidi, TinySoundFont)
 and the SoundFont in files.soundfonts (TimGM6mb). You can put another
 .sf2 file there instead.
 
@@ -104,7 +104,7 @@ Licences
 fheroes2 is free software under the GNU General Public License, version
 2 or later; see docs.COPYING. This port's changes are in docs.patches.
 It also contains SDL2 and riscos-mesa's RISC OS drivers (zlib licence),
-SDL2_mixer (zlib licence), riscos-midisynth (MIT) with TinySoundFont
+SDL2_mixer (zlib licence), riscos-softmidi (MIT) with TinySoundFont
 (MIT), UnixLib, and the TimGM6mb SoundFont (GPL 2). See docs.Licences.
 
 Heroes of Might and Magic is a trademark of its owners. This port isn't

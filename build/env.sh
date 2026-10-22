@@ -2,32 +2,63 @@
 #   . build/env.sh
 #
 # Everything can be overridden from the environment before sourcing.
-#   GCCSDK_ENV  cross toolchain: riscos-crossdev 1.3 (GCC 10.2, static only)
-#   UNIXLIB     UnixLib release put over the toolchain's (dl/$UNIXLIB/libunixlib.a);
-#               empty = keep the toolchain's own (5.0.3.2 in crossdev 1.3)
-#   DEVKIT      unpacked riscos-mesa devkit (SDL2 with the RISC OS driver, zlib)
-#   DL          source tarballs (see build/SHA256SUMS.txt)
-#   SRC         where sources are unpacked and patched
-#   STAGE       cross-built libraries and headers (--prefix for the deps)
-#   JOBS        make parallelism
+#   RISCOS_TOOLCHAIN  riscos-crossdev's toolchain (GCCSDK GCC 10.2, UnixLib
+#                     5.0.3.3, static). Set in the riscos-crossdev container
+#                     image; otherwise build/prepare-toolchain.sh unpacks the
+#                     toolchain tarball into $GCCSDK_ENV
+#   GCCSDK_ENV        the toolchain used (default $RISCOS_TOOLCHAIN, else
+#                     /opt/rx/riscos-crossdev-toolchain-1.4-x86_64-linux)
+#   RISCOS_DEVKIT     a riscos-mesa devkit (SDL2 with the RISC OS driver, zlib),
+#                     used only if it is the version .riscos-deps names (the
+#                     image's can be older); otherwise the one fetched into
+#                     $DEVKIT is used
+#   UNIXLIB           optional: a riscos-unixlib release put over the
+#                     toolchain's (dl/$UNIXLIB/libunixlib.a, local builds only)
+#   DL                downloaded sources (build/fetch.sh; build/SHA256SUMS.txt)
+#   SRC               where sources are unpacked and patched
+#   STAGE             cross-built libraries and headers (--prefix for the deps)
+#   JOBS              make parallelism
 
 RFH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
-: "${GCCSDK_ENV:=/opt/rx/riscos-crossdev-toolchain-1.3-x86_64-linux}"
-: "${DEVKIT:=/opt/dk/riscos-mesa-devkit-20.3.5-17}"
+# A release named in .riscos-deps, without the v.
+riscos_dep() {
+  awk -v n="$1" '$1 == n || $1 == "adyoull/" n {sub(/^v/, "", $2); print $2}' "$RFH_ROOT/.riscos-deps"
+}
+MESA_VERSION=$(riscos_dep riscos-mesa)
+SOFTMIDI_VERSION=$(riscos_dep riscos-softmidi)
+[ -n "$MESA_VERSION" ] && [ -n "$SOFTMIDI_VERSION" ] || { echo "env.sh: .riscos-deps needs riscos-mesa and riscos-softmidi lines" >&2; return 1 2>/dev/null || exit 1; }
+
+: "${RISCOS_TOOLCHAIN:=}"
+: "${GCCSDK_ENV:=${RISCOS_TOOLCHAIN:-/opt/rx/riscos-crossdev-toolchain-1.4-x86_64-linux}}"
+TOOLCHAIN_TARBALL=riscos-crossdev-toolchain-1.4-x86_64-linux.tar.xz
 : "${DL:=$RFH_ROOT/dl}"
 : "${SRC:=$RFH_ROOT/src}"
 : "${STAGE:=$RFH_ROOT/stage}"
 : "${JOBS:=$(nproc)}"
+: "${UNIXLIB=}"
+
+# The devkit .riscos-deps names: the given one if it is that version.
+MESA_DEVKIT_FILE=riscos-mesa-devkit-$MESA_VERSION.tgz
+MESA_DEVKIT_URL=https://github.com/adyoull/riscos-mesa/releases/download/v$MESA_VERSION/$MESA_DEVKIT_FILE
+if [ -z "${DEVKIT:-}" ]; then
+  if [ -n "${RISCOS_DEVKIT:-}" ] && [ "$(cat "$RISCOS_DEVKIT/VERSION" 2>/dev/null)" = "riscos-mesa devkit $MESA_VERSION" ]; then
+    DEVKIT=$RISCOS_DEVKIT
+  else
+    DEVKIT=$RFH_ROOT/devkit/riscos-mesa-devkit-$MESA_VERSION
+  fi
+fi
+
+# riscos-softmidi (the library is still called midisynth): its source, and its
+# release zip for the TimGM6mb SoundFont and that SoundFont's licence.
+SOFTMIDI_TARBALL=riscos-softmidi-$SOFTMIDI_VERSION.tar.gz
+SOFTMIDI_ZIP=SoftMIDI-$SOFTMIDI_VERSION.zip
+# TimGM6mb 1.3 (6 MB, GPL 2), the SoundFont in that zip.
+TIMGM6MB_SHA256=c5378b62028c920cb11e4803327983fee2f2cdff5dc89c708e39da417e51c854
 
 FHEROES2_VERSION=1.1.17
-RISCOS_REL=riscos11test
+RISCOS_REL=riscos12test
 MIXER_VERSION=2.6.3
-MIDISYNTH_VERSION=0.4.2
-# riscos-unixlib release linked instead of crossdev 1.3's 5.0.3.2. Its public
-# headers are identical to 5.0.3.2's (checked: the include/ hunks of the two
-# releases' unixlib-riscos.diff match), so only the library is replaced.
-: "${UNIXLIB=unixlib-5.0.3.3}"
 
 TARGET=arm-riscos-gnueabihf
 BUILD=$(gcc -dumpmachine)

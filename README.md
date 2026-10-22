@@ -10,15 +10,16 @@ the application's `!Help`.
 ## How it's built
 
 - **Toolchain:** [riscos-crossdev](https://github.com/adyoull/riscos-crossdev)
-  1.3 (GCCSDK GCC 10.2, PThreadTicker 0.03; static only), with UnixLib
-  replaced by the [riscos-unixlib](https://github.com/adyoull/riscos-unixlib)
-  5.0.3.3 release.
+  1.8.2 (GCCSDK GCC 10.2, UnixLib 5.0.3.3, PThreadTicker 0.03; static
+  only). The versions are in `.riscos-deps`; GitHub builds every push in
+  riscos-crossdev's container image, and opens a pull request when one of
+  them makes a release (see BUILDING.md).
 - **SDL2:** the riscos-mesa devkit 20.3.5-17 (SDL 2.26 with the RISC OS video
   and SharedSoundBuffer sound drivers), used as it is.
 - **SDL2_mixer 2.6.3**: WAV; Ogg Vorbis, MP3 and FLAC with its bundled
   decoders (stb_vorbis, dr_mp3, dr_flac); and MIDI through a new decoder
-  that plays it with [riscos-midisynth](https://github.com/adyoull/riscos-midisynth)
-  0.4.2 (`patches/sdl2_mixer`; 0002 renames SDL_mixer's stb_vorbis so it
+  that plays it with [riscos-softmidi](https://github.com/adyoull/riscos-softmidi)
+  0.5.0's midisynth library (`patches/sdl2_mixer`; 0002 renames SDL_mixer's stb_vorbis so it
   doesn't clash with midisynth's).
 - **fheroes2 1.1.17** with the patches in `patches/fheroes2` (see `series`):
 
@@ -44,7 +45,7 @@ See [BUILDING.md](BUILDING.md) for the steps and checks, and
 
 fheroes2 is GPL 2 or later, and so is this port's work on it (see COPYING). The build
 scripts and tools are under the same licence. SDL2 and SDL2_mixer are
-zlib-licensed, riscos-midisynth and TinySoundFont MIT, the TimGM6mb
+zlib-licensed, riscos-softmidi and TinySoundFont MIT, the TimGM6mb
 SoundFont GPL 2. The application's `docs.licences` has every notice.
 
 Heroes of Might and Magic is a trademark of its owners. This port isn't

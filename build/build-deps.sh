@@ -26,10 +26,11 @@ unpack() {
   fi
 }
 
-# riscos-midisynth (TinySoundFont): the MIDI synthesiser for the music.
+# riscos-softmidi's library, midisynth (TinySoundFont): the MIDI synthesiser
+# for the music.
 step_midisynth() {
-  unpack riscos-midisynth-$MIDISYNTH_VERSION.tar.gz riscos-midisynth-$MIDISYNTH_VERSION
-  make -C "$SRC/riscos-midisynth-$MIDISYNTH_VERSION" \
+  unpack "$SOFTMIDI_TARBALL" riscos-softmidi-$SOFTMIDI_VERSION
+  make -C "$SRC/riscos-softmidi-$SOFTMIDI_VERSION" \
     CROSS="$GCCSDK_ENV/bin/$TARGET-" \
     RO_CFLAGS="-O3 -ffast-math -mfpu=vfpv3 -mfloat-abi=hard -mtune=cortex-a72 -fstack-clash-protection" \
     GCCSDK_INSTALL_ENV="$STAGE" build/riscos/libmidisynth.a install

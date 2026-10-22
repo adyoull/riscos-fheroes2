@@ -5,14 +5,14 @@
 #   - test_mixer_formats: Ogg Vorbis, MP3 and FLAC in the same program as
 #     midisynth (its stb_vorbis must not clash with SDL_mixer's renamed one).
 # Needs: gcc, libsdl2-dev, python3, ffmpeg (for the tone files) and a
-# riscos-midisynth checkout (MIDISYNTH_SRC, default src/riscos-midisynth-*).
+# riscos-softmidi checkout (MIDISYNTH_SRC, default src/riscos-softmidi-*).
 #   tests/mixer-midisynth/run.sh
 set -e -o pipefail
 . "$(dirname "$0")/../../build/env.sh"
 # Host build: the cross pkg-config settings from env.sh must not leak in.
 unset PKG_CONFIG_LIBDIR
 HERE=$(cd "$(dirname "$0")" && pwd)
-MS=${MIDISYNTH_SRC:-$SRC/riscos-midisynth-$MIDISYNTH_VERSION}
+MS=${MIDISYNTH_SRC:-$SRC/riscos-softmidi-$SOFTMIDI_VERSION}
 T=$(mktemp -d)
 make -s -C "$MS" host >/dev/null
 tar xzf "$DL/SDL2_mixer-$MIXER_VERSION.tar.gz" -C "$T"

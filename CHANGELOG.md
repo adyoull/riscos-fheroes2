@@ -1,5 +1,33 @@
 # riscos-fheroes2 changes
 
+## 1.1.17-riscos12test
+
+Built on GitHub, with a pull request whenever something it's built with
+makes a release (riscos-crossdev's `docs/CI.md`).
+
+- **`.riscos-deps`:** riscos-crossdev v1.8.2, riscos-mesa v20.3.5-17,
+  riscos-softmidi v0.5.0.
+- **Toolchain:** riscos-crossdev's (1.8.2: toolchain 1.4, UnixLib 5.0.3.3)
+  instead of the 1.3 toolchain with the riscos-unixlib 5.0.3.3 library
+  copied over it. In the container image the image's toolchain is used as
+  it is.
+- **The MIDI synthesiser** is riscos-softmidi 0.5.0's midisynth (was
+  riscos-midisynth 0.4.2, the same project before it was renamed). The
+  TimGM6mb SoundFont now comes from riscos-softmidi's release zip (the
+  same file) and its licence from riscos-softmidi's `!SoftMIDI`.
+- **`build/fetch.sh`** downloads every source by its release URL and
+  checks it: fheroes2 1.1.17 is now GitHub's archive of the tag (the same
+  files as before, a different tarball), SDL2_mixer comes from its GitHub
+  release, and the devkit from riscos-mesa's release when the image's is
+  a different version.
+- **GitHub workflows** (`.github/workflows/`, from riscos-crossdev 1.8.2):
+  a build of every push in the image, with riscos-crossdev's checks and the
+  present-path host test, keeping the zip; and a daily check for new
+  releases of what `.riscos-deps` names, which opens a pull request built
+  with them. `ci/riscos-deps-hook.sh` moves the devkit's and
+  riscos-softmidi's checksums with them.
+- Nothing changes in the game.
+
 ## 1.1.17-riscos11test
 
 - Linked with the released riscos-mesa devkit **20.3.5-17** (was the test

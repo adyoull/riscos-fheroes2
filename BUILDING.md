@@ -1,36 +1,82 @@
 # Building riscos-fheroes2
 
-On an x86_64 Linux machine (tested: Ubuntu 24.04) with `build-essential`,
-`autoconf`, `libtool`, `pkg-config`, `gettext`, `gawk`, `python3` and
-`python3-pil`.
+The easy way is riscos-crossdev's container image, as the GitHub workflows
+do (below). Otherwise, on an x86_64 Linux machine (tested: Ubuntu 24.04)
+with `build-essential`, `autoconf`, `libtool`, `pkg-config`, `gettext`,
+`gawk`, `curl`, `unzip`, `python3` and `python3-pil`.
 
-## Sources
+## What it's built with
 
-Put these in `dl/` (their SHA-256 sums are in `build/SHA256SUMS.txt`):
+`.riscos-deps` names the releases of the owner's other repositories:
+
+```
+riscos-crossdev v1.8.2     the toolchain (GCCSDK GCC 10.2, UnixLib 5.0.3.3, static)
+riscos-mesa v20.3.5-17     the devkit: SDL2 with the RISC OS drivers, zlib
+riscos-softmidi v0.5.0     the MIDI synthesiser (its library is midisynth) and the TimGM6mb SoundFont
+```
+
+`build/fetch.sh` (run by `prepare-toolchain.sh`) downloads into `dl/`
+what isn't there yet, and checks everything against
+`build/SHA256SUMS.txt`:
 
 | File | From |
 |---|---|
-| `riscos-crossdev-toolchain-1.3-x86_64-linux.tar.xz` | riscos-crossdev release 1.3 |
-| `riscos-mesa-devkit-20.3.5-17.tgz` | riscos-mesa release 20.3.5-17 |
-| `unixlib-5.0.3.3/libunixlib.a` | riscos-unixlib release 5.0.3.3 (put over the toolchain's 5.0.3.2 by `prepare-toolchain.sh`) |
-| `fheroes2-1.1.17.tar.gz` | `git archive --prefix=fheroes2-1.1.17/` of tag 1.1.17 (2685c21) |
-| `SDL2_mixer-2.6.3.tar.gz` | libsdl.org release |
-| `riscos-midisynth-0.4.2.tar.gz` | `git archive --prefix=riscos-midisynth-0.4.2/` of riscos-midisynth 0.4.2 (628e4b6) |
-| `TimGM6mb.sf2` | TimGM6mb 1.3 (as shipped with !MIDISynth) |
-| `h2demo.zip` | the HoMM II demo, for testing only (never shipped) |
+| `fheroes2-1.1.17.tar.gz` | GitHub's archive of fheroes2's tag 1.1.17 |
+| `SDL2_mixer-2.6.3.tar.gz` | SDL_mixer's GitHub release 2.6.3 |
+| `riscos-softmidi-0.5.0.tar.gz` | GitHub's archive of riscos-softmidi's tag v0.5.0 |
+| `SoftMIDI-0.5.0.zip` | riscos-softmidi's release zip (the SoundFont, `!SoftMIDI.SoundFont`, is TimGM6mb 1.3) |
+| `riscos-mesa-devkit-20.3.5-17.tgz` | riscos-mesa's release (only if `RISCOS_DEVKIT` isn't that version; unpacked into `devkit/`) |
+
+Outside the image, also put riscos-crossdev's
+`riscos-crossdev-toolchain-1.4-x86_64-linux.tar.xz` in `dl/`.
+`h2demo.zip` (the HoMM II demo) is only for testing by hand; it's never
+shipped.
 
 ## Steps
 
 ```sh
-build/prepare-toolchain.sh     # toolchain -> /opt/rx/..., devkit -> /opt/dk/...
+build/prepare-toolchain.sh     # the toolchain (unless the image's), then build/fetch.sh
 build/build-deps.sh            # midisynth, SDL2_mixer -> stage/
-build/build-fheroes2.sh unpack # fresh tree in src/, patches, build (about 5 min on 2 cores)
+build/build-fheroes2.sh unpack # fresh tree in src/, patches, build (about 4 min on 2 cores)
 build/package.sh               # checks, then dist/!fheroes2 and the zip
 ```
 
-`GCCSDK_ENV`, `DEVKIT`, `DL`, `SRC`, `STAGE` and `JOBS` can be set before
-running (see `build/env.sh`). `build-fheroes2.sh` without `unpack`
-rebuilds the existing tree (only what changed).
+In the image:
+
+```sh
+docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/src ghcr.io/adyoull/riscos-crossdev:1.8.2 \
+  sh -c 'build/prepare-toolchain.sh && build/build-deps.sh && build/build-fheroes2.sh unpack && build/package.sh'
+```
+
+There the toolchain is `$RISCOS_TOOLCHAIN` (left as it is), and
+riscos-crossdev's own checks run too (`$RCD_DIR`). `GCCSDK_ENV`,
+`DEVKIT`, `DL`, `SRC`, `STAGE` and `JOBS` can be set before running (see
+`build/env.sh`). `build-fheroes2.sh` without `unpack` rebuilds the
+existing tree (only what changed).
+
+## Building on GitHub
+
+`.github/workflows/` has riscos-crossdev's two workflows (its `docs/CI.md`):
+
+- `riscos-build.yml` builds and checks every push in the image of the
+  riscos-crossdev release in `.riscos-deps`, runs the host test of the
+  present path, and keeps `dist/*.zip` on the run's page. It needs
+  `gettext` and `python3-pil` on top of the image (`PACKAGES`).
+- `riscos-deps-update.yml` looks once a day for a newer release of what
+  `.riscos-deps` names. If there is one, it moves the pin (and, through
+  `ci/riscos-deps-hook.sh`, the checksums in `build/SHA256SUMS.txt`),
+  builds with it, and opens a pull request saying whether that passed.
+  Nothing is merged or released by itself: merge, test on a Pi, release.
+
+On GitHub, Settings > Actions > General needs "Workflow permissions: Read
+and write" and "Allow GitHub Actions to create and approve pull requests".
+
+## Releases
+
+Releases are made by hand as before (tag `v1.1.17-riscosN`, the release
+folder, `gh release create`). Mark test builds as pre-releases: the
+workflows of repositories built on this one only see the release marked
+latest.
 
 ## Checks (package.sh runs them)
 

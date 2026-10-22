@@ -18,6 +18,11 @@ FH2_TREE=$TREE "$RFH_ROOT/tools/check-unixlib.sh" "$ELF"
 python3 "$RFH_ROOT/tools/check-stack-probes.py" "$ELF" "$TARGET-objdump" | tail -1 | tee /dev/stderr | grep -q ' 0 without stack probes' \
   || die "functions with big stack frames and no probes"
 if strings -a "$ELF" | grep -E -i 'claude|/home/' >/dev/null; then die "build paths or names in the binary"; fi
+# In the riscos-crossdev image (or with RCD_DIR set): its checks too (static,
+# stack probes, FPU level, UnixLib).
+if [ -n "${RCD_DIR:-}" ]; then
+  "$RCD_DIR/checks/check-all.sh" "$ELF" || die "riscos-crossdev's checks failed"
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/docs/licences" "$APP/docs/patches" "$APP/files/data" "$APP/files/lang" \
@@ -43,8 +48,10 @@ cp "$TREE/files/lang/"*.mo "$APP/files/lang/"
 cp "$TREE/maps/"*.fh2m "$APP/maps/"
 
 # MIDI SoundFont for the music (riscos-midisynth plays it).
-check_sha "$DL/TimGM6mb.sf2"
-cp "$DL/TimGM6mb.sf2" "$APP/files/soundfonts/TimGM6mb.sf2"
+# The TimGM6mb SoundFont, from riscos-softmidi's release zip (!SoftMIDI.SoundFont).
+check_sha "$DL/$SOFTMIDI_ZIP"
+unzip -p "$DL/$SOFTMIDI_ZIP" '!SoftMIDI/SoundFont' > "$APP/files/soundfonts/TimGM6mb.sf2"
+echo "$TIMGM6MB_SHA256  $APP/files/soundfonts/TimGM6mb.sf2" | sha256sum -c --quiet - || die "the SoundFont in $SOFTMIDI_ZIP isn't TimGM6mb 1.3"
 
 # Docs and licences.
 cp "$TREE/LICENSE" "$APP/docs/COPYING,fff"
@@ -60,11 +67,11 @@ MX=$SRC/SDL2_mixer-$MIXER_VERSION/src/codecs
   echo; echo "dr_mp3 and dr_flac (MP3, FLAC), David Reid, bundled in SDL2_mixer:"; echo
   awk '/^This software is available as a choice of the following licenses/{p=1} p' "$MX/dr_libs/dr_flac.h"
 } > "$lic/SDL2_mixer-decoders,fff"
-MS=$SRC/riscos-midisynth-$MIDISYNTH_VERSION
+MS=$SRC/riscos-softmidi-$SOFTMIDI_VERSION
 cp "$MS/LICENSE" "$lic/midisynth,fff"
 cp "$MS/third_party/TinySoundFont/LICENSE" "$lic/TinySoundFont,fff" 2>/dev/null \
   || sed -n '1,/^\*\//p' "$MS/third_party/TinySoundFont/tsf.h" > "$lic/TinySoundFont,fff"
-cp "$MS/app/!MIDISynth/SFLicence,fff" "$lic/TimGM6mb,fff"
+cp "$MS/app/!SoftMIDI/SFLicence,fff" "$lic/TimGM6mb,fff"
 cp "$GCCSDK_ENV/riscos/PThreadTicker-Licence,fff" "$lic/PThreadTicker,fff"
 
 # GPL corresponding source: the patches applied to fheroes2 and SDL2_mixer.
