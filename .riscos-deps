@@ -5,6 +5,6 @@
 # the MIDI synthesiser's source and SoundFont that build/fetch.sh downloads;
 # their sha256s are in build/SHA256SUMS.txt (ci/riscos-deps-hook.sh moves
 # those lines with these).
-riscos-crossdev v1.8.2
-riscos-mesa v20.3.5-17
+riscos-crossdev v1.11.2
+riscos-mesa v20.3.5-19
 riscos-softmidi v0.5.0
